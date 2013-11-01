@@ -25,6 +25,10 @@ my $msiz = $rnum * 50;
 my $tnum = THREADNUM;
 my $rtnum = $rnum / $tnum;
 my @commands = (
+                "./kcstashtest order -bnum $bnum $rnum",
+                "./kcstashtest order -th $tnum -bnum $tbnum $rtnum",
+                "./kccachetest order -bnum $bnum $rnum",
+                "./kccachetest order -th $tnum -bnum $tbnum $rtnum",
                 "./kchashtest order -set -bnum $bnum -msiz $msiz $file $rnum",
 #                "./kchashtest order -set -oat -bnum $bnum -msiz $msiz $file $rnum",
                 "./kchashtest order -get -msiz $msiz $file $rnum",

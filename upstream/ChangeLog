@@ -1,3 +1,9 @@
+2011-05-13  FAL Labs  <info@fallabs.com>
+
+	* kcplantdb.h (PlantDB::accept): lock promotion was abolished.
+
+	- Release: 1.2.55
+
 2011-05-12  FAL Labs  <info@fallabs.com>
 
 	* kchashdb.h (HashDB::accept, HashDB::accept_bulk): promotion was replaced by try locking.

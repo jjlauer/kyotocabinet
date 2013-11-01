@@ -124,7 +124,7 @@ class PlantDB : public BasicDB {
      */
     explicit Cursor(PlantDB* db) : db_(db), stack_(), kbuf_(NULL), ksiz_(0), lid_(0) {
       _assert_(db);
-      ScopedSpinRWLock lock(&db_->mlock_, true);
+      ScopedRWLock lock(&db_->mlock_, true);
       db_->curs_.push_back(this);
     }
     /**
@@ -133,7 +133,7 @@ class PlantDB : public BasicDB {
     virtual ~Cursor() {
       _assert_(true);
       if (!db_) return;
-      ScopedSpinRWLock lock(&db_->mlock_, true);
+      ScopedRWLock lock(&db_->mlock_, true);
       if (kbuf_) clear_position();
       db_->curs_.remove(this);
     }
@@ -169,10 +169,8 @@ class PlantDB : public BasicDB {
       bool hit = false;
       if (lid_ > 0 && !accept_spec(visitor, writable, step, &hit)) err = true;
       if (!err && !hit) {
-        if (!db_->mlock_.promote()) {
-          db_->mlock_.unlock();
-          db_->mlock_.lock_writer();
-        }
+        db_->mlock_.unlock();
+        db_->mlock_.lock_writer();
         if (kbuf_) {
           bool retry = true;
           while (!err && retry) {
@@ -192,7 +190,7 @@ class PlantDB : public BasicDB {
      */
     bool jump() {
       _assert_(true);
-      ScopedSpinRWLock lock(&db_->mlock_, false);
+      ScopedRWLock lock(&db_->mlock_, false);
       if (db_->omode_ == 0) {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -210,7 +208,7 @@ class PlantDB : public BasicDB {
      */
     bool jump(const char* kbuf, size_t ksiz) {
       _assert_(kbuf && ksiz <= MEMMAXSIZ);
-      ScopedSpinRWLock lock(&db_->mlock_, false);
+      ScopedRWLock lock(&db_->mlock_, false);
       if (db_->omode_ == 0) {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -240,7 +238,7 @@ class PlantDB : public BasicDB {
      */
     bool jump_back() {
       _assert_(true);
-      ScopedSpinRWLock lock(&db_->mlock_, false);
+      ScopedRWLock lock(&db_->mlock_, false);
       if (db_->omode_ == 0) {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -258,7 +256,7 @@ class PlantDB : public BasicDB {
      */
     bool jump_back(const char* kbuf, size_t ksiz) {
       _assert_(kbuf && ksiz <= MEMMAXSIZ);
-      ScopedSpinRWLock lock(&db_->mlock_, false);
+      ScopedRWLock lock(&db_->mlock_, false);
       if (db_->omode_ == 0) {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -271,10 +269,8 @@ class PlantDB : public BasicDB {
           bool hit = false;
           if (lid_ > 0 && !back_position_spec(&hit)) err = true;
           if (!err && !hit) {
-            if (!db_->mlock_.promote()) {
-              db_->mlock_.unlock();
-              db_->mlock_.lock_writer();
-            }
+            db_->mlock_.unlock();
+            db_->mlock_.lock_writer();
             if (kbuf_) {
               if (!back_position_atom()) err = true;
             } else {
@@ -333,10 +329,8 @@ class PlantDB : public BasicDB {
       bool hit = false;
       if (lid_ > 0 && !back_position_spec(&hit)) err = true;
       if (!err && !hit) {
-        if (!db_->mlock_.promote()) {
-          db_->mlock_.unlock();
-          db_->mlock_.lock_writer();
-        }
+        db_->mlock_.unlock();
+        db_->mlock_.lock_writer();
         if (kbuf_) {
           if (!back_position_atom()) err = true;
         } else {
@@ -565,10 +559,8 @@ class PlantDB : public BasicDB {
           if (link || flush || async) {
             int64_t id = node->id;
             if (atran && !link && !db_->fix_auto_transaction_leaf(node)) err = true;
-            if (!db_->mlock_.promote()) {
-              db_->mlock_.unlock();
-              db_->mlock_.lock_writer();
-            }
+            db_->mlock_.unlock();
+            db_->mlock_.lock_writer();
             if (link) {
               node = db_->search_tree(link, true, hist, &hnum);
               if (node) {
@@ -1019,22 +1011,11 @@ class PlantDB : public BasicDB {
     bool err = false;
     int64_t id = node->id;
     if (atran && !reorg && !fix_auto_transaction_leaf(node)) err = true;
-    if (reorg && mlock_.promote()) {
-      if (!reorganize_tree(node, hist, hnum)) err = true;
-      if (atran && !fix_auto_transaction_tree()) err = true;
-      reorg = false;
-    } else if (cusage_ > pccap_) {
+    if (cusage_ > pccap_) {
       int32_t idx = id % SLOTNUM;
       LeafSlot* lslot = lslots_ + idx;
       if (!clean_leaf_cache_part(lslot)) err = true;
-      if (mlock_.promote()) {
-        if (!flush_leaf_cache_part(lslot)) err = true;
-        InnerSlot* islot = islots_ + idx;
-        if (islot->warm->count() > lslot->warm->count() + lslot->hot->count() + 1 &&
-            !flush_inner_cache_part(islot)) err = true;
-      } else {
-        flush = true;
-      }
+      flush = true;
     }
     mlock_.unlock();
     if (reorg) {
@@ -1077,7 +1058,7 @@ class PlantDB : public BasicDB {
   bool accept_bulk(const std::vector<std::string>& keys, Visitor* visitor,
                    bool writable = true) {
     _assert_(visitor);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -1127,7 +1108,6 @@ class PlantDB : public BasicDB {
       } else if (cusage_ > pccap_) {
         int32_t idx = node->id % SLOTNUM;
         LeafSlot* lslot = lslots_ + idx;
-        if (!clean_leaf_cache_part(lslot)) err = true;
         if (!flush_leaf_cache_part(lslot)) err = true;
         InnerSlot* islot = islots_ + idx;
         if (islot->warm->count() > lslot->warm->count() + lslot->hot->count() + 1 &&
@@ -1151,7 +1131,7 @@ class PlantDB : public BasicDB {
    */
   bool iterate(Visitor *visitor, bool writable = true, ProgressChecker* checker = NULL) {
     _assert_(visitor);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -1303,7 +1283,7 @@ class PlantDB : public BasicDB {
    */
   bool open(const std::string& path, uint32_t mode = OWRITER | OCREATE) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1402,7 +1382,7 @@ class PlantDB : public BasicDB {
    */
   bool close() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -1474,10 +1454,8 @@ class PlantDB : public BasicDB {
         return false;
       }
       if (!clean_inner_cache()) err = true;
-      if (!mlock_.promote()) {
-        mlock_.unlock();
-        mlock_.lock_writer();
-      }
+      mlock_.unlock();
+      mlock_.lock_writer();
       if (checker && !checker->check("synchronize", "flushing the leaf node cache", -1, -1)) {
         set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
         mlock_.unlock();
@@ -1524,7 +1502,7 @@ class PlantDB : public BasicDB {
    */
   bool occupy(bool writable = true, FileProcessor* proc = NULL) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, writable);
+    ScopedRWLock lock(&mlock_, writable);
     bool err = false;
     if (proc && !proc->process(db_.path(), count_, db_.size())) {
       set_error(_KCCODELINE_, Error::LOGIC, "processing failed");
@@ -1612,7 +1590,7 @@ class PlantDB : public BasicDB {
    */
   bool end_transaction(bool commit = true) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -1637,7 +1615,7 @@ class PlantDB : public BasicDB {
    */
   bool clear() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -1671,7 +1649,7 @@ class PlantDB : public BasicDB {
    */
   int64_t count() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return -1;
@@ -1684,7 +1662,7 @@ class PlantDB : public BasicDB {
    */
   int64_t size() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return -1;
@@ -1697,7 +1675,7 @@ class PlantDB : public BasicDB {
    */
   std::string path() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return "";
@@ -1711,7 +1689,7 @@ class PlantDB : public BasicDB {
    */
   bool status(std::map<std::string, std::string>* strmap) {
     _assert_(strmap);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -1780,7 +1758,7 @@ class PlantDB : public BasicDB {
   void log(const char* file, int32_t line, const char* func, Logger::Kind kind,
            const char* message) {
     _assert_(file && line > 0 && func && message);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     db_.log(file, line, func, kind, message);
   }
   /**
@@ -1793,7 +1771,7 @@ class PlantDB : public BasicDB {
    */
   bool tune_logger(Logger* logger, uint32_t kinds = Logger::WARN | Logger::ERROR) {
     _assert_(logger);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1807,7 +1785,7 @@ class PlantDB : public BasicDB {
    */
   bool tune_meta_trigger(MetaTrigger* trigger) {
     _assert_(trigger);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1822,7 +1800,7 @@ class PlantDB : public BasicDB {
    */
   bool tune_alignment(int8_t apow) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1837,7 +1815,7 @@ class PlantDB : public BasicDB {
    */
   bool tune_fbp(int8_t fpow) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1854,7 +1832,7 @@ class PlantDB : public BasicDB {
    */
   bool tune_options(int8_t opts) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1869,7 +1847,7 @@ class PlantDB : public BasicDB {
    */
   bool tune_buckets(int64_t bnum) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1884,7 +1862,7 @@ class PlantDB : public BasicDB {
    */
   bool tune_page(int32_t psiz) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1899,7 +1877,7 @@ class PlantDB : public BasicDB {
    */
   bool tune_map(int64_t msiz) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1913,7 +1891,7 @@ class PlantDB : public BasicDB {
    */
   bool tune_defrag(int64_t dfunit) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1927,7 +1905,7 @@ class PlantDB : public BasicDB {
    */
   bool tune_page_cache(int64_t pccap) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1942,7 +1920,7 @@ class PlantDB : public BasicDB {
    */
   bool tune_compressor(Compressor* comp) {
     _assert_(comp);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1959,7 +1937,7 @@ class PlantDB : public BasicDB {
    */
   bool tune_comparator(Comparator* rcomp) {
     _assert_(rcomp);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -1973,7 +1951,7 @@ class PlantDB : public BasicDB {
    */
   char* opaque() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return NULL;
@@ -1986,7 +1964,7 @@ class PlantDB : public BasicDB {
    */
   bool synchronize_opaque() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -2000,7 +1978,7 @@ class PlantDB : public BasicDB {
    */
   bool defrag(int64_t step = 0) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -2019,7 +1997,7 @@ class PlantDB : public BasicDB {
    */
   uint8_t flags() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return 0;
@@ -2032,7 +2010,7 @@ class PlantDB : public BasicDB {
    */
   Comparator* rcomp() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return 0;
@@ -3364,7 +3342,7 @@ class PlantDB : public BasicDB {
         kbuf++;
         ksiz--;
         char tkbuf[NUMBUFSIZ];
-        memcpy(tkbuf, kbuf, ksiz);
+        std::memcpy(tkbuf, kbuf, ksiz);
         tkbuf[ksiz] = '\0';
         int64_t id = atoih(tkbuf);
         uint64_t prev;
@@ -3655,7 +3633,7 @@ class PlantDB : public BasicDB {
   /** Dummy Operator to forbid the use. */
   PlantDB& operator =(const PlantDB&);
   /** The method lock. */
-  SpinRWLock mlock_;
+  RWLock mlock_;
   /** The internal meta operation trigger. */
   MetaTrigger* mtrigger_;
   /** The open mode. */
