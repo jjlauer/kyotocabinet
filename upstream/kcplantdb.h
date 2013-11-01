@@ -402,7 +402,7 @@ class PlantDB : public BasicDB {
           db_->db_.report(_KCCODELINE_, Logger::WARN, "id=%lld", (long long)id);
           return false;
         }
-        ScopedSpinRWLock lock(&node->lock, false);
+        ScopedRWLock lock(&node->lock, false);
         RecordArray& recs = node->recs;
         if (!recs.empty()) {
           set_position(recs.front(), id);
@@ -428,7 +428,7 @@ class PlantDB : public BasicDB {
           db_->db_.report(_KCCODELINE_, Logger::WARN, "id=%lld", (long long)id);
           return false;
         }
-        ScopedSpinRWLock lock(&node->lock, false);
+        ScopedRWLock lock(&node->lock, false);
         RecordArray& recs = node->recs;
         if (!recs.empty()) {
           set_position(recs.back(), id);
@@ -1345,6 +1345,7 @@ class PlantDB : public BasicDB {
         if (!db_.close()) return false;
         if (!db_.open(path, mode)) return false;
       }
+      if (count_ == INT64MAX && !reorganize_file(mode)) return false;
     }
     if (writer_ && db_.count() < 1) {
       root_ = 0;
@@ -2128,7 +2129,7 @@ class PlantDB : public BasicDB {
    * Leaf node of B+ tree.
    */
   struct LeafNode {
-    SpinRWLock lock;                     ///< lock
+    RWLock lock;                         ///< lock
     int64_t id;                          ///< page ID number
     RecordArray recs;                    ///< sorted array of records
     int64_t size;                        ///< total size of records
@@ -2166,7 +2167,7 @@ class PlantDB : public BasicDB {
    * Inner node of B+ tree.
    */
   struct InnerNode {
-    SpinRWLock lock;                     ///< lock
+    RWLock lock;                         ///< lock
     int64_t id;                          ///< page ID numger
     int64_t heir;                        ///< child before the first link
     LinkArray links;                     ///< sorted array of links
@@ -2186,7 +2187,7 @@ class PlantDB : public BasicDB {
    * Slot cache of inner nodes.
    */
   struct InnerSlot {
-    SpinLock lock;                       ///< lock
+    Mutex lock;                          ///< lock
     InnerCache* warm;                    ///< warm cache
   };
   /**
@@ -2378,7 +2379,7 @@ class PlantDB : public BasicDB {
    */
   bool save_leaf_node(LeafNode* node) {
     _assert_(node);
-    ScopedSpinRWLock lock(&node->lock, false);
+    ScopedRWLock lock(&node->lock, false);
     if (!node->dirty) return true;
     bool err = false;
     char hbuf[NUMBUFSIZ];
@@ -2695,7 +2696,7 @@ class PlantDB : public BasicDB {
     bool err = false;
     for (int32_t i = 0; i < SLOTNUM; i++) {
       InnerSlot* slot = islots_ + i;
-      ScopedSpinLock lock(&slot->lock);
+      ScopedMutex lock(&slot->lock);
       typename InnerCache::Iterator it = slot->warm->begin();
       typename InnerCache::Iterator itend = slot->warm->end();
       while (it != itend) {
@@ -2794,7 +2795,7 @@ class PlantDB : public BasicDB {
     _assert_(id > 0);
     int32_t sidx = id % SLOTNUM;
     InnerSlot* slot = islots_ + sidx;
-    ScopedSpinLock lock(&slot->lock);
+    ScopedMutex lock(&slot->lock);
     InnerNode** np = slot->warm->get(id, InnerCache::MLAST);
     if (np) return *np;
     char hbuf[NUMBUFSIZ];
@@ -3345,16 +3346,27 @@ class PlantDB : public BasicDB {
     _assert_(true);
     if (!load_meta()) return false;
     bool err = false;
+    std::set<int64_t> ids;
+    std::set<int64_t> prevs;
+    std::set<int64_t> nexts;
     class VisitorImpl : public DB::Visitor {
      public:
-      explicit VisitorImpl() : count_(0) {}
+      explicit VisitorImpl(std::set<int64_t>* ids,
+                           std::set<int64_t>* prevs, std::set<int64_t>* nexts) :
+          ids_(ids), prevs_(prevs), nexts_(nexts), count_(0) {}
       int64_t count() {
         return count_;
       }
      private:
       const char* visit_full(const char* kbuf, size_t ksiz,
                              const char* vbuf, size_t vsiz, size_t* sp) {
-        if (ksiz < 2 || kbuf[0] != LNPREFIX) return NOP;
+        if (ksiz < 2 || ksiz >= NUMBUFSIZ || kbuf[0] != LNPREFIX) return NOP;
+        kbuf++;
+        ksiz--;
+        char tkbuf[NUMBUFSIZ];
+        memcpy(tkbuf, kbuf, ksiz);
+        tkbuf[ksiz] = '\0';
+        int64_t id = atoih(tkbuf);
         uint64_t prev;
         size_t step = readvarnum(vbuf, vsiz, &prev);
         if (step < 1) return NOP;
@@ -3365,6 +3377,9 @@ class PlantDB : public BasicDB {
         if (step < 1) return NOP;
         vbuf += step;
         vsiz -= step;
+        ids_->insert(id);
+        if (prev > 0) prevs_->insert(prev);
+        if (next > 0) nexts_->insert(next);
         while (vsiz > 1) {
           uint64_t rksiz;
           step = readvarnum(vbuf, vsiz, &rksiz);
@@ -3385,12 +3400,34 @@ class PlantDB : public BasicDB {
         }
         return NOP;
       }
+      std::set<int64_t>* ids_;
+      std::set<int64_t>* prevs_;
+      std::set<int64_t>* nexts_;
       int64_t count_;
-    } visitor;
+    } visitor(&ids, &prevs, &nexts);
     if (!db_.iterate(&visitor, false)) err = true;
     int64_t count = visitor.count();
     db_.report(_KCCODELINE_, Logger::WARN, "recalculated the record count from %lld to %lld",
                (long long)count_, (long long)count);
+    std::set<int64_t>::iterator iitend = ids.end();
+    std::set<int64_t>::iterator nit = nexts.begin();
+    std::set<int64_t>::iterator nitend = nexts.end();
+    while (nit != nitend) {
+      if (ids.find(*nit) == ids.end()) {
+        db_.report(_KCCODELINE_, Logger::WARN, "detected missing leaf: %lld", (long long)*nit);
+        count = INT64MAX;
+      }
+      ++nit;
+    }
+    std::set<int64_t>::iterator pit = prevs.begin();
+    std::set<int64_t>::iterator pitend = prevs.end();
+    while (pit != pitend) {
+      if (ids.find(*pit) == iitend) {
+        db_.report(_KCCODELINE_, Logger::WARN, "detected missing leaf: %lld", (long long)*pit);
+        count = INT64MAX;
+      }
+      ++pit;
+    }
     count_ = count;
     if (!dump_meta()) err = true;
     return !err;

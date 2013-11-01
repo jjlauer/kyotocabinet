@@ -72,7 +72,7 @@ class ProtoDB : public BasicDB {
      */
     explicit Cursor(ProtoDB* db) : db_(db), it_(db->recs_.end()) {
       _assert_(db);
-      ScopedSpinRWLock lock(&db_->mlock_, true);
+      ScopedRWLock lock(&db_->mlock_, true);
       db_->curs_.push_back(this);
     }
     /**
@@ -81,7 +81,7 @@ class ProtoDB : public BasicDB {
     virtual ~Cursor() {
       _assert_(true);
       if (!db_) return;
-      ScopedSpinRWLock lock(&db_->mlock_, true);
+      ScopedRWLock lock(&db_->mlock_, true);
       db_->curs_.remove(this);
     }
     /**
@@ -96,7 +96,7 @@ class ProtoDB : public BasicDB {
      */
     bool accept(Visitor* visitor, bool writable = true, bool step = false) {
       _assert_(visitor);
-      ScopedSpinRWLock lock(&db_->mlock_, true);
+      ScopedRWLock lock(&db_->mlock_, true);
       if (db_->omode_ == 0) {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -150,7 +150,7 @@ class ProtoDB : public BasicDB {
      */
     bool jump() {
       _assert_(true);
-      ScopedSpinRWLock lock(&db_->mlock_, true);
+      ScopedRWLock lock(&db_->mlock_, true);
       if (db_->omode_ == 0) {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -170,7 +170,7 @@ class ProtoDB : public BasicDB {
      */
     bool jump(const char* kbuf, size_t ksiz) {
       _assert_(kbuf && ksiz <= MEMMAXSIZ);
-      ScopedSpinRWLock lock(&db_->mlock_, true);
+      ScopedRWLock lock(&db_->mlock_, true);
       if (db_->omode_ == 0) {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -197,7 +197,7 @@ class ProtoDB : public BasicDB {
      */
     bool jump_back() {
       _assert_(true);
-      ScopedSpinRWLock lock(&db_->mlock_, true);
+      ScopedRWLock lock(&db_->mlock_, true);
       if (db_->omode_ == 0) {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -221,7 +221,7 @@ class ProtoDB : public BasicDB {
      */
     bool jump_back(const char* kbuf, size_t ksiz) {
       _assert_(kbuf && ksiz <= MEMMAXSIZ);
-      ScopedSpinRWLock lock(&db_->mlock_, true);
+      ScopedRWLock lock(&db_->mlock_, true);
       if (db_->omode_ == 0) {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -269,7 +269,7 @@ class ProtoDB : public BasicDB {
      */
     bool step() {
       _assert_(true);
-      ScopedSpinRWLock lock(&db_->mlock_, true);
+      ScopedRWLock lock(&db_->mlock_, true);
       if (db_->omode_ == 0) {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -291,7 +291,7 @@ class ProtoDB : public BasicDB {
      */
     bool step_back() {
       _assert_(true);
-      ScopedSpinRWLock lock(&db_->mlock_, true);
+      ScopedRWLock lock(&db_->mlock_, true);
       if (db_->omode_ == 0) {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -376,7 +376,7 @@ class ProtoDB : public BasicDB {
   bool accept(const char* kbuf, size_t ksiz, Visitor* visitor, bool writable = true) {
     _assert_(kbuf && ksiz <= MEMMAXSIZ && visitor);
     if (writable) {
-      ScopedSpinRWLock lock(&mlock_, true);
+      ScopedRWLock lock(&mlock_, true);
       if (omode_ == 0) {
         set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -429,7 +429,7 @@ class ProtoDB : public BasicDB {
         }
       }
     } else {
-      ScopedSpinRWLock lock(&mlock_, false);
+      ScopedRWLock lock(&mlock_, false);
       if (omode_ == 0) {
         set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
@@ -469,7 +469,7 @@ class ProtoDB : public BasicDB {
   bool accept_bulk(const std::vector<std::string>& keys, Visitor* visitor,
                    bool writable = true) {
     _assert_(visitor);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -542,7 +542,7 @@ class ProtoDB : public BasicDB {
    */
   bool iterate(Visitor *visitor, bool writable = true, ProgressChecker* checker = NULL) {
     _assert_(visitor);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -638,7 +638,7 @@ class ProtoDB : public BasicDB {
    */
   bool open(const std::string& path, uint32_t mode = OWRITER | OCREATE) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -656,7 +656,7 @@ class ProtoDB : public BasicDB {
    */
   bool close() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -693,7 +693,7 @@ class ProtoDB : public BasicDB {
   bool synchronize(bool hard = false, FileProcessor* proc = NULL,
                    ProgressChecker* checker = NULL) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -728,7 +728,7 @@ class ProtoDB : public BasicDB {
    */
   bool occupy(bool writable = true, FileProcessor* proc = NULL) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, writable);
+    ScopedRWLock lock(&mlock_, writable);
     bool err = false;
     if (proc && !proc->process(path_, recs_.size(), size_)) {
       set_error(_KCCODELINE_, Error::LOGIC, "processing failed");
@@ -810,7 +810,7 @@ class ProtoDB : public BasicDB {
    */
   bool end_transaction(bool commit = true) {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -853,7 +853,7 @@ class ProtoDB : public BasicDB {
    */
   bool clear() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -878,7 +878,7 @@ class ProtoDB : public BasicDB {
    */
   int64_t count() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return -1;
@@ -891,7 +891,7 @@ class ProtoDB : public BasicDB {
    */
   int64_t size() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return -1;
@@ -904,7 +904,7 @@ class ProtoDB : public BasicDB {
    */
   std::string path() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return "";
@@ -918,7 +918,7 @@ class ProtoDB : public BasicDB {
    */
   bool status(std::map<std::string, std::string>* strmap) {
     _assert_(strmap);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -954,7 +954,7 @@ class ProtoDB : public BasicDB {
   void log(const char* file, int32_t line, const char* func, Logger::Kind kind,
            const char* message) {
     _assert_(file && line > 0 && func && message);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     if (!logger_) return;
     logger_->log(file, line, func, kind, message);
   }
@@ -968,7 +968,7 @@ class ProtoDB : public BasicDB {
    */
   bool tune_logger(Logger* logger, uint32_t kinds = Logger::WARN | Logger::ERROR) {
     _assert_(logger);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -984,7 +984,7 @@ class ProtoDB : public BasicDB {
    */
   bool tune_meta_trigger(MetaTrigger* trigger) {
     _assert_(trigger);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ != 0) {
       set_error(_KCCODELINE_, Error::INVALID, "already opened");
       return false;
@@ -998,7 +998,7 @@ class ProtoDB : public BasicDB {
    */
   char* opaque() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, false);
+    ScopedRWLock lock(&mlock_, false);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return NULL;
@@ -1011,7 +1011,7 @@ class ProtoDB : public BasicDB {
    */
   bool synchronize_opaque() {
     _assert_(true);
-    ScopedSpinRWLock lock(&mlock_, true);
+    ScopedRWLock lock(&mlock_, true);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
@@ -1141,7 +1141,7 @@ class ProtoDB : public BasicDB {
   /** Dummy Operator to forbid the use. */
   ProtoDB& operator =(const ProtoDB&);
   /** The method lock. */
-  SpinRWLock mlock_;
+  RWLock mlock_;
   /** The last happened error. */
   TSD<Error> error_;
   /** The internal logger. */

@@ -1,3 +1,13 @@
+2011-05-12  FAL Labs  <info@fallabs.com>
+
+	* kchashdb.h (HashDB::accept, HashDB::accept_bulk): promotion was replaced by try locking.
+
+	* kcplantdb.h (PlantDB::recalc_count): validation checking was added.
+
+	- some spin locks in the database classes were replaced by the system lock primitives.
+
+	- Release: 1.2.54
+
 2011-05-01  FAL Labs  <info@fallabs.com>
 
 	* kcdbext.h (MapReduce::map): MapEmitter was integrated.
