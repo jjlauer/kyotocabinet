@@ -483,9 +483,14 @@ int32_t kcdbappend(KCDB* db, const char* kbuf, size_t ksiz, const char* vbuf, si
  * @param kbuf the pointer to the key region.
  * @param ksiz the size of the key region.
  * @param num the additional number.
+ * @param orig the origin number if no record corresponds to the key.  If it is INT64_MIN and
+ * no record corresponds, this function fails.  If it is INT64_MAX, the value is set as the
+ * additional number regardless of the current value.
  * @return the result value, or INT64_MIN on failure.
+ * @note The value is serialized as an 8-byte binary integer in big-endian order, not a decimal
+ * string.  If existing value is not 8-byte, this function fails.
  */
-int64_t kcdbincrint(KCDB* db, const char* kbuf, size_t ksiz, int64_t num);
+int64_t kcdbincrint(KCDB* db, const char* kbuf, size_t ksiz, int64_t num, int64_t orig);
 
 
 /**
@@ -494,9 +499,14 @@ int64_t kcdbincrint(KCDB* db, const char* kbuf, size_t ksiz, int64_t num);
  * @param kbuf the pointer to the key region.
  * @param ksiz the size of the key region.
  * @param num the additional number.
+ * @param orig the origin number if no record corresponds to the key.  If it is negative
+ * infinity and no record corresponds, this function fails.  If it is positive infinity, the
+ * value is set as the additional number regardless of the current value.
  * @return the result value, or Not-a-number on failure.
+ * @note The value is serialized as an 16-byte binary fixed-point number in big-endian order,
+ * not a decimal string.  If existing value is not 16-byte, this function fails.
  */
-double kcdbincrdouble(KCDB* db, const char* kbuf, size_t ksiz, double num);
+double kcdbincrdouble(KCDB* db, const char* kbuf, size_t ksiz, double num, double orig);
 
 
 /**

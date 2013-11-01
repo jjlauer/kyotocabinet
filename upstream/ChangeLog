@@ -1,3 +1,9 @@
+2011-05-18  FAL Labs  <info@fallabs.com>
+
+	* kclangc.cc (kcdbincrint, kcdbincrdouble): "orig" parameter was added.
+
+	- Release: 1.2.57
+
 2011-05-14  FAL Labs  <info@fallabs.com>
 
 	* kcthread.c (AtomicInt64::cas): a bug on 64-bit Windows was fixed.

@@ -343,20 +343,20 @@ int32_t kcdbappend(KCDB* db, const char* kbuf, size_t ksiz, const char* vbuf, si
 /**
  * Add a number to the numeric value of a record.
  */
-int64_t kcdbincrint(KCDB* db, const char* kbuf, size_t ksiz, int64_t num) {
+int64_t kcdbincrint(KCDB* db, const char* kbuf, size_t ksiz, int64_t num, int64_t orig) {
   _assert_(db && kbuf && ksiz <= MEMMAXSIZ);
   PolyDB* pdb = (PolyDB*)db;
-  return pdb->increment(kbuf, ksiz, num);
+  return pdb->increment(kbuf, ksiz, num, orig);
 }
 
 
 /**
  * Add a number to the numeric value of a record.
  */
-double kcdbincrdouble(KCDB* db, const char* kbuf, size_t ksiz, double num) {
+double kcdbincrdouble(KCDB* db, const char* kbuf, size_t ksiz, double num, double orig) {
   _assert_(db && kbuf && ksiz <= MEMMAXSIZ);
   PolyDB* pdb = (PolyDB*)db;
-  return pdb->increment_double(kbuf, ksiz, num);
+  return pdb->increment_double(kbuf, ksiz, num, orig);
 }
 
 
