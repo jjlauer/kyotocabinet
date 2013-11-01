@@ -1,3 +1,9 @@
+2011-08-01  FAL Labs  <info@fallabs.com>
+
+	* kcplantdb.h (PlantDB::jump, PlantDB::step): a bug related to direction switch was fixed.
+
+	- Release: 1.2.70
+
 2011-07-16  FAL Labs  <info@fallabs.com>
 
 	* kcutil.h (kcstrutflen): new function.

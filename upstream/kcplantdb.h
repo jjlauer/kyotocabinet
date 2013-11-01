@@ -207,10 +207,10 @@ class PlantDB : public BasicDB {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
       }
+      back_ = false;
       if (kbuf_) clear_position();
       bool err = false;
       if (!set_position(db_->first_)) err = true;
-      back_ = false;
       return !err;
     }
     /**
@@ -226,6 +226,7 @@ class PlantDB : public BasicDB {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
       }
+      back_ = false;
       if (kbuf_) clear_position();
       set_position(kbuf, ksiz, 0);
       bool err = false;
@@ -233,7 +234,6 @@ class PlantDB : public BasicDB {
         if (kbuf_) clear_position();
         err = true;
       }
-      back_ = false;
       return !err;
     }
     /**
@@ -257,10 +257,10 @@ class PlantDB : public BasicDB {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
       }
+      back_ = true;
       if (kbuf_) clear_position();
       bool err = false;
       if (!set_position_back(db_->last_)) err = true;
-      back_ = true;
       return !err;
     }
     /**
@@ -276,6 +276,7 @@ class PlantDB : public BasicDB {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         return false;
       }
+      back_ = true;
       if (kbuf_) clear_position();
       set_position(kbuf, ksiz, 0);
       bool err = false;
@@ -298,7 +299,6 @@ class PlantDB : public BasicDB {
         if (kbuf_) clear_position();
         if (!set_position_back(db_->last_)) err = true;
       }
-      back_ = true;
       return !err;
     }
     /**
@@ -316,13 +316,13 @@ class PlantDB : public BasicDB {
      */
     bool step() {
       _assert_(true);
+      back_ = false;
       DB::Visitor visitor;
       if (!accept(&visitor, false, true)) return false;
       if (!kbuf_) {
         db_->set_error(_KCCODELINE_, Error::NOREC, "no record");
         return false;
       }
-      back_ = false;
       return true;
     }
     /**
@@ -342,6 +342,7 @@ class PlantDB : public BasicDB {
         db_->mlock_.unlock();
         return false;
       }
+      back_ = true;
       bool err = false;
       bool hit = false;
       if (lid_ > 0 && !back_position_spec(&hit)) err = true;
@@ -356,7 +357,6 @@ class PlantDB : public BasicDB {
         }
       }
       db_->mlock_.unlock();
-      back_ = true;
       return !err;
     }
     /**
