@@ -1261,6 +1261,124 @@ class PlantDB : public BasicDB {
     return !err;
   }
   /**
+   * Scan each record in parallel.
+   * @param visitor a visitor object.
+   * @param thnum the number of worker threads.
+   * @param checker a progress checker object.  If it is NULL, no checking is performed.
+   * @return true on success, or false on failure.
+   * @note This function is for reading records and not for updating ones.  The return value of
+   * the visitor is just ignored.  To avoid deadlock, any explicit database operation must not
+   * be performed in this function.
+   */
+  bool scan_parallel(Visitor *visitor, size_t thnum, ProgressChecker* checker = NULL) {
+    _assert_(visitor && thnum <= MEMMAXSIZ);
+    ScopedRWLock lock(&mlock_, true);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, Error::INVALID, "not opened");
+      return false;
+    }
+    if (thnum < 1) thnum = 0;
+    if (thnum > (size_t)INT8MAX) thnum = INT8MAX;
+    bool err = false;
+    if (writer_) {
+      if (checker && !checker->check("scan_parallel", "cleaning the leaf node cache", -1, -1)) {
+        set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+        return false;
+      }
+      if (!clean_leaf_cache()) err = true;
+    }
+    ScopedVisitor svis(visitor);
+    int64_t allcnt = count_;
+    if (checker && !checker->check("scan_parallel", "beginning", 0, allcnt)) {
+      set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+      return false;
+    }
+    class ProgressCheckerImpl : public ProgressChecker {
+     public:
+      explicit ProgressCheckerImpl() : ok_(1) {}
+      void stop() {
+        ok_.set(0);
+      }
+     private:
+      bool check(const char* name, const char* message, int64_t curcnt, int64_t allcnt) {
+        return ok_ > 0;
+      }
+      AtomicInt64 ok_;
+    };
+    ProgressCheckerImpl ichecker;
+    class VisitorImpl : public Visitor {
+     public:
+      explicit VisitorImpl(PlantDB* db, Visitor* visitor,
+                           ProgressChecker* checker, int64_t allcnt,
+                           ProgressCheckerImpl* ichecker) :
+          db_(db), visitor_(visitor), checker_(checker), allcnt_(allcnt),
+          ichecker_(ichecker), error_() {}
+      const Error& error() {
+        return error_;
+      }
+     private:
+      const char* visit_full(const char* kbuf, size_t ksiz,
+                             const char* vbuf, size_t vsiz, size_t* sp) {
+        if (ksiz < 2 || ksiz >= NUMBUFSIZ || kbuf[0] != LNPREFIX) return NOP;
+        uint64_t prev;
+        size_t step = readvarnum(vbuf, vsiz, &prev);
+        if (step < 1) return NOP;
+        vbuf += step;
+        vsiz -= step;
+        uint64_t next;
+        step = readvarnum(vbuf, vsiz, &next);
+        if (step < 1) return NOP;
+        vbuf += step;
+        vsiz -= step;
+        while (vsiz > 1) {
+          uint64_t rksiz;
+          step = readvarnum(vbuf, vsiz, &rksiz);
+          if (step < 1) break;
+          vbuf += step;
+          vsiz -= step;
+          uint64_t rvsiz;
+          step = readvarnum(vbuf, vsiz, &rvsiz);
+          if (step < 1) break;
+          vbuf += step;
+          vsiz -= step;
+          if (vsiz < rksiz + rvsiz) break;
+          size_t xvsiz;
+          visitor_->visit_full(vbuf, rksiz, vbuf + rksiz, rvsiz, &xvsiz);
+          vbuf += rksiz;
+          vsiz -= rksiz;
+          vbuf += rvsiz;
+          vsiz -= rvsiz;
+          if (checker_ && !checker_->check("scan_parallel", "processing", -1, allcnt_)) {
+            db_->set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+            error_ = db_->error();
+            ichecker_->stop();
+            break;
+          }
+        }
+        return NOP;
+      }
+      PlantDB* db_;
+      Visitor* visitor_;
+      ProgressChecker* checker_;
+      int64_t allcnt_;
+      ProgressCheckerImpl* ichecker_;
+      Error error_;
+    };
+    VisitorImpl ivisitor(this, visitor, checker, allcnt, &ichecker);
+    if (!db_.scan_parallel(&ivisitor, thnum, &ichecker)) err = true;
+    if (ivisitor.error() != Error::SUCCESS) {
+      const Error& e = ivisitor.error();
+      db_.set_error(_KCCODELINE_, e.code(), e.message());
+      err = true;
+    }
+    if (checker && !checker->check("scan_parallel", "ending", -1, allcnt)) {
+      set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+      err = true;
+    }
+    trigger_meta(MetaTrigger::ITERATE, "scan_parallel");
+    return !err;
+  }
+  /**
    * Get the last happened error.
    * @return the last happened error.
    */

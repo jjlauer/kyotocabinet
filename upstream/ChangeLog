@@ -1,3 +1,13 @@
+2011-05-30  FAL Labs  <info@fallabs.com>
+
+	* kcdb.h (BasicDB::scan_parallel, BasicDB::scan_parallel_impl): new functions.
+
+	* kccachedb.h (CacheDB::switch_rotation): new function.
+
+	* kcdbext.h (MapReduce::execute): parallel options were added.
+
+	- Release: 1.2.59
+
 2011-05-19  FAL Labs  <info@fallabs.com>
 
 	* kcplantdb.cc (PlantDB::accept): locking mode of transaction was modified.

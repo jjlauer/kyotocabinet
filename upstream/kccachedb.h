@@ -140,14 +140,14 @@ class CacheDB : public BasicDB {
         uint64_t hash = db_->hash_record(dbuf, rksiz) / SLOTNUM;
         Slot* slot = db_->slots_ + sidx_;
         Repeater repeater(Visitor::REMOVE, 0);
-        db_->accept_impl(slot, hash, dbuf, rksiz, &repeater, db_->comp_, true);
+        db_->accept_impl(slot, hash, dbuf, rksiz, &repeater, db_->comp_, false);
       } else if (vbuf == Visitor::NOP) {
         if (step) step_impl();
       } else {
         uint64_t hash = db_->hash_record(dbuf, rksiz) / SLOTNUM;
         Slot* slot = db_->slots_ + sidx_;
         Repeater repeater(vbuf, vsiz);
-        db_->accept_impl(slot, hash, dbuf, rksiz, &repeater, db_->comp_, true);
+        db_->accept_impl(slot, hash, dbuf, rksiz, &repeater, db_->comp_, false);
         if (step) step_impl();
       }
       return true;
@@ -376,7 +376,7 @@ class CacheDB : public BasicDB {
       mlock_(), flock_(), error_(), logger_(NULL), logkinds_(0), mtrigger_(NULL),
       omode_(0), curs_(), path_(""), type_(TYPECACHE),
       opts_(0), bnum_(DEFBNUM), capcnt_(-1), capsiz_(-1),
-      opaque_(), embcomp_(ZLIBRAWCOMP), comp_(NULL), slots_(), tran_(false) {
+      opaque_(), embcomp_(ZLIBRAWCOMP), comp_(NULL), slots_(), rttmode_(true), tran_(false) {
     _assert_(true);
   }
   /**
@@ -424,7 +424,7 @@ class CacheDB : public BasicDB {
     hash /= SLOTNUM;
     Slot* slot = slots_ + sidx;
     slot->lock.lock();
-    accept_impl(slot, hash, kbuf, ksiz, visitor, comp_, false);
+    accept_impl(slot, hash, kbuf, ksiz, visitor, comp_, rttmode_);
     slot->lock.unlock();
     return true;
   }
@@ -482,7 +482,7 @@ class CacheDB : public BasicDB {
     for (size_t i = 0; i < knum; i++) {
       RecordKey* rkey = rkeys + i;
       Slot* slot = slots_ + rkey->sidx;
-      accept_impl(slot, rkey->hash, rkey->kbuf, rkey->ksiz, visitor, comp_, false);
+      accept_impl(slot, rkey->hash, rkey->kbuf, rkey->ksiz, visitor, comp_, rttmode_);
     }
     sit = sidxs.begin();
     sitend = sidxs.end();
@@ -545,11 +545,11 @@ class CacheDB : public BasicDB {
         if (vbuf == Visitor::REMOVE) {
           uint64_t hash = hash_record(dbuf, rksiz) / SLOTNUM;
           Repeater repeater(Visitor::REMOVE, 0);
-          accept_impl(slot, hash, dbuf, rksiz, &repeater, comp_, true);
+          accept_impl(slot, hash, dbuf, rksiz, &repeater, comp_, false);
         } else if (vbuf != Visitor::NOP) {
           uint64_t hash = hash_record(dbuf, rksiz) / SLOTNUM;
           Repeater repeater(vbuf, vsiz);
-          accept_impl(slot, hash, dbuf, rksiz, &repeater, comp_, true);
+          accept_impl(slot, hash, dbuf, rksiz, &repeater, comp_, false);
         }
         rec = next;
         curcnt++;
@@ -564,6 +564,126 @@ class CacheDB : public BasicDB {
       return false;
     }
     trigger_meta(MetaTrigger::ITERATE, "iterate");
+    return true;
+  }
+  /**
+   * Scan each record in parallel.
+   * @param visitor a visitor object.
+   * @param thnum the number of worker threads.
+   * @param checker a progress checker object.  If it is NULL, no checking is performed.
+   * @return true on success, or false on failure.
+   * @note This function is for reading records and not for updating ones.  The return value of
+   * the visitor is just ignored.  To avoid deadlock, any explicit database operation must not
+   * be performed in this function.
+   */
+  bool scan_parallel(Visitor *visitor, size_t thnum, ProgressChecker* checker = NULL) {
+    _assert_(visitor && thnum <= MEMMAXSIZ);
+    ScopedRWLock lock(&mlock_, false);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, Error::INVALID, "not opened");
+      return false;
+    }
+    if (thnum < 1) thnum = 1;
+    thnum = std::pow(2, (int32_t)std::log2(thnum * std::sqrt(2)));
+    if (thnum > (size_t)SLOTNUM) thnum = SLOTNUM;
+    ScopedVisitor svis(visitor);
+    int64_t allcnt = count_impl();
+    if (checker && !checker->check("scan_parallel", "beginning", -1, allcnt)) {
+      set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+      return false;
+    }
+    class ThreadImpl : public Thread {
+     public:
+      explicit ThreadImpl() :
+          db_(NULL), visitor_(NULL), checker_(NULL), allcnt_(0), slots_(), error_() {}
+      void init(CacheDB* db, Visitor* visitor, ProgressChecker* checker, int64_t allcnt) {
+        db_ = db;
+        visitor_ = visitor;
+        checker_ = checker;
+        allcnt_ = allcnt;
+      }
+      void add_slot(Slot* slot) {
+        slots_.push_back(slot);
+      }
+      const Error& error() {
+        return error_;
+      }
+     private:
+      void run() {
+        CacheDB* db = db_;
+        Visitor* visitor = visitor_;
+        ProgressChecker* checker = checker_;
+        int64_t allcnt = allcnt_;
+        Compressor* comp = db->comp_;
+        std::vector<Slot*>::iterator sit = slots_.begin();
+        std::vector<Slot*>::iterator sitend = slots_.end();
+        while (sit != sitend) {
+          Slot* slot = *sit;
+          Record* rec = slot->first;
+          while (rec) {
+            Record* next = rec->next;
+            uint32_t rksiz = rec->ksiz & KSIZMAX;
+            char* dbuf = (char*)rec + sizeof(*rec);
+            const char* rvbuf = dbuf + rksiz;
+            size_t rvsiz = rec->vsiz;
+            char* zbuf = NULL;
+            size_t zsiz = 0;
+            if (comp) {
+              zbuf = comp->decompress(rvbuf, rvsiz, &zsiz);
+              if (zbuf) {
+                rvbuf = zbuf;
+                rvsiz = zsiz;
+              }
+            }
+            size_t vsiz;
+            visitor->visit_full(dbuf, rksiz, rvbuf, rvsiz, &vsiz);
+            delete[] zbuf;
+            rec = next;
+            if (checker && !checker->check("scan_parallel", "processing", -1, allcnt)) {
+              db->set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+              error_ = db->error();
+              break;
+            }
+          }
+          ++sit;
+        }
+      }
+      CacheDB* db_;
+      Visitor* visitor_;
+      ProgressChecker* checker_;
+      int64_t allcnt_;
+      std::vector<Slot*> slots_;
+      Error error_;
+    };
+    bool err = false;
+    bool orttmode = rttmode_;
+    rttmode_ = false;
+    ThreadImpl* threads = new ThreadImpl[thnum];
+    for (int32_t i = 0; i < SLOTNUM; i++) {
+      ThreadImpl* thread = threads + (i % thnum);
+      thread->add_slot(slots_ + i);
+    }
+    for (size_t i = 0; i < thnum; i++) {
+      ThreadImpl* thread = threads + i;
+      thread->init(this, visitor, checker, allcnt);
+      thread->start();
+    }
+    for (size_t i = 0; i < thnum; i++) {
+      ThreadImpl* thread = threads + i;
+      thread->join();
+      if (thread->error() != Error::SUCCESS) {
+        *error_ = thread->error();
+        err = true;
+      }
+    }
+    delete[] threads;
+    rttmode_ = orttmode;
+    if (err) return false;
+    if (checker && !checker->check("scan_parallel", "ending", -1, allcnt)) {
+      set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+      return false;
+    }
+    trigger_meta(MetaTrigger::ITERATE, "scan_parallel");
     return true;
   }
   /**
@@ -1042,6 +1162,18 @@ class CacheDB : public BasicDB {
     return true;
   }
   /**
+   * Switch the mode of LRU rotation.
+   * @param rttmode true to enable LRU rotation, false to disable LRU rotation.
+   * @return true on success, or false on failure.
+   * @note This function can be called while the database is opened.
+   */
+  bool switch_rotation(bool rttmode) {
+    _assert_(true);
+    ScopedRWLock lock(&mlock_, true);
+    rttmode_ = rttmode;
+    return true;
+  }
+  /**
    * Get the opaque data.
    * @return the pointer to the opaque data region, whose size is 16 bytes.
    */
@@ -1480,10 +1612,10 @@ class CacheDB : public BasicDB {
    * @param ksiz the size of the key region.
    * @param visitor a visitor object.
    * @param comp the data compressor.
-   * @param isiter true for iterator use, or false for direct use.
+   * @param rtt whether to move the record to the last.
    */
   void accept_impl(Slot* slot, uint64_t hash, const char* kbuf, size_t ksiz, Visitor* visitor,
-                   Compressor* comp, bool isiter) {
+                   Compressor* comp, bool rtt) {
     _assert_(slot && kbuf && ksiz <= MEMMAXSIZ && visitor);
     size_t bidx = hash % slot->bnum;
     Record* rec = slot->buckets[bidx];
@@ -1596,7 +1728,7 @@ class CacheDB : public BasicDB {
               rec->vsiz = vsiz;
               delete[] zbuf;
             }
-            if (!isiter && slot->last != rec) {
+            if (rtt && slot->last != rec) {
               if (!curs_.empty()) escape_cursors(rec);
               if (slot->first == rec) slot->first = rec->next;
               if (rec->prev) rec->prev->next = rec->next;
@@ -1769,10 +1901,10 @@ class CacheDB : public BasicDB {
       uint64_t hash = hash_record(kbuf, ksiz) / SLOTNUM;
       if (it->full) {
         Setter setter(vbuf, vsiz);
-        accept_impl(slot, hash, kbuf, ksiz, &setter, NULL, true);
+        accept_impl(slot, hash, kbuf, ksiz, &setter, NULL, false);
       } else {
         Remover remover;
-        accept_impl(slot, hash, kbuf, ksiz, &remover, NULL, true);
+        accept_impl(slot, hash, kbuf, ksiz, &remover, NULL, false);
       }
     }
   }
@@ -1791,7 +1923,7 @@ class CacheDB : public BasicDB {
       std::memcpy(kbuf, dbuf, rksiz);
       uint64_t hash = hash_record(kbuf, rksiz) / SLOTNUM;
       Remover remover;
-      accept_impl(slot, hash, dbuf, rksiz, &remover, NULL, true);
+      accept_impl(slot, hash, dbuf, rksiz, &remover, NULL, false);
       if (kbuf != stack) delete[] kbuf;
     }
   }
@@ -1917,6 +2049,8 @@ class CacheDB : public BasicDB {
   Compressor* comp_;
   /** The slot tables. */
   Slot slots_[SLOTNUM];
+  /** The flag whether in LRU rotation. */
+  bool rttmode_;
   /** The flag whether in transaction. */
   bool tran_;
 };

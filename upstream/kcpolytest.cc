@@ -106,7 +106,8 @@ static void usage() {
   eprintf("  %s tran [-th num] [-it num] [-hard] [-oat|-oas|-onl|-otl|-onr] [-lv]"
           " path rnum\n", g_progname);
   eprintf("  %s mapred [-rnd] [-oat|-oas|-onl|-otl|-onr] [-lv] [-tmp str]"
-          " [-dbnum num] [-clim num] [-cbnum num] [-xnl] [-xnc] path rnum\n", g_progname);
+          " [-dbnum num] [-clim num] [-cbnum num] [-xnl] [-xpm] [-xpr] [-xnc] path rnum\n",
+          g_progname);
   eprintf("  %s index [-th num] [-rnd] [-set|-get|-rem|-etc]"
           " [-oat|-oas|-onl|-otl|-onr] [-lv] path rnum\n", g_progname);
   eprintf("  %s misc path\n", g_progname);
@@ -443,6 +444,10 @@ static int32_t runmapred(int argc, char** argv) {
         cbnum = kc::atoix(argv[i]);
       } else if (!std::strcmp(argv[i], "-xnl")) {
         opts |= kc::MapReduce::XNOLOCK;
+      } else if (!std::strcmp(argv[i], "-xpm")) {
+        opts |= kc::MapReduce::XPARAMAP;
+      } else if (!std::strcmp(argv[i], "-xpr")) {
+        opts |= kc::MapReduce::XPARARED;
       } else if (!std::strcmp(argv[i], "-xnc")) {
         opts |= kc::MapReduce::XNOCOMP;
       } else {
@@ -2308,14 +2313,14 @@ static int32_t procmapred(const char* path, int64_t rnum, bool rnd, int32_t ofla
    public:
     MapReduceImpl() : mapcnt_(0), redcnt_(0) {}
     bool map(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
-      mapcnt_++;
+      mapcnt_.add(1);
       return emit(vbuf, vsiz, kbuf, ksiz);
     }
     bool reduce(const char* kbuf, size_t ksiz, ValueIterator* iter) {
       const char* vbuf;
       size_t vsiz;
       while ((vbuf = iter->next(&vsiz)) != NULL) {
-        redcnt_++;
+        redcnt_.add(1);
       }
       return true;
     }
@@ -2349,8 +2354,8 @@ static int32_t procmapred(const char* path, int64_t rnum, bool rnd, int32_t ofla
       return redcnt_;
     }
    private:
-    int64_t mapcnt_;
-    int64_t redcnt_;
+    kc::AtomicInt64 mapcnt_;
+    kc::AtomicInt64 redcnt_;
   };
   MapReduceImpl mr;
   mr.tune_storage(dbnum, clim, cbnum);
@@ -2914,6 +2919,75 @@ static int32_t procmisc(const char* path) {
         kc::File::remove_recursively(dpath.c_str());
       }
     }
+  }
+  oprintf("scanning in parallel:\n");
+  class VisitorCount : public kc::DB::Visitor {
+   public:
+    explicit VisitorCount() : cnt_(0) {}
+    int64_t cnt() {
+      return cnt_;
+    }
+   private:
+    const char* visit_full(const char* kbuf, size_t ksiz,
+                           const char* vbuf, size_t vsiz, size_t* sp) {
+      cnt_.add(1);
+      return NOP;
+    }
+    kc::AtomicInt64 cnt_;
+  } visitorcount;
+  class ProgressCheckerCount : public kc::BasicDB::ProgressChecker {
+   public:
+    explicit ProgressCheckerCount() : cnt_(0) {}
+    int64_t cnt() {
+      return cnt_;
+    }
+   private:
+    bool check(const char* name, const char* message, int64_t curcnt, int64_t allcnt) {
+      cnt_.add(1);
+      return true;
+    }
+    kc::AtomicInt64 cnt_;
+  } checkercount;
+  class ThreadWicked : public kc::Thread {
+   public:
+    explicit ThreadWicked(kc::BasicDB* db, int64_t rnum) :
+        db_(db), rnum_(rnum), err_(false) {}
+    bool error() {
+      return err_;
+    }
+   private:
+    void run() {
+      for (int64_t i = 0; i < rnum_; i++) {
+        char kbuf[RECBUFSIZ];
+        size_t ksiz = std::sprintf(kbuf, "%08lld", (long long)i);
+        size_t vsiz;
+        char* vbuf = db_->get(kbuf, ksiz, &vsiz);
+        if (vbuf) {
+          delete[] vbuf;
+        } else if (db_->error() != kc::BasicDB::Error::NOREC) {
+          dberrprint(db_, __LINE__, "DB::set");
+          err_ = true;
+        }
+      }
+    }
+    kc::BasicDB* db_;
+    int64_t rnum_;
+    bool err_;
+  } threadwicked(pdb, rnum);
+  threadwicked.start();
+  if (!db->scan_parallel(&visitorcount, 4, &checkercount)) {
+    dberrprint(pdb, __LINE__, "DB::scan_parallel");
+    err = true;
+  }
+  threadwicked.join();
+  if (threadwicked.error()) err = true;
+  if (visitorcount.cnt() != db->count()) {
+    dberrprint(pdb, __LINE__, "DB::scan_parallel");
+    err = true;
+  }
+  if (checkercount.cnt() < db->count() + 2) {
+    dberrprint(pdb, __LINE__, "DB::scan_parallel ss");
+    err = true;
   }
   oprintf("deleting the database object:\n");
   delete db;

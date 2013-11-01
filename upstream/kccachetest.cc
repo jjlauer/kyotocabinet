@@ -1839,6 +1839,10 @@ static int32_t procwicked(int64_t rnum, int32_t thnum, int32_t itnum,
                 break;
               }
             }
+            if (!db_->switch_rotation(myrand(4) > 0)) {
+              dberrprint(db_, __LINE__, "DB::switch_rotation");
+              err_ = true;
+            }
           }
           if (i == rnum_ / 2) {
             if (myrand(thnum_ * 4) == 0) {

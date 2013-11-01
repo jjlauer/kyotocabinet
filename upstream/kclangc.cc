@@ -301,6 +301,29 @@ int32_t kcdbiterate(KCDB* db, KCVISITFULL fullproc, void* opq, int32_t writable)
 
 
 /**
+ * Scan each record in parallel.
+ */
+int32_t kcdbscanpara(KCDB* db, KCVISITFULL fullproc, void* opq, size_t thnum) {
+  _assert_(db && thnum <= MEMMAXSIZ);
+  PolyDB* pdb = (PolyDB*)db;
+  class VisitorImpl : public DB::Visitor {
+   public:
+    explicit VisitorImpl(KCVISITFULL fullproc, void* opq) : fullproc_(fullproc), opq_(opq) {}
+    const char* visit_full(const char* kbuf, size_t ksiz,
+                           const char* vbuf, size_t vsiz, size_t* sp) {
+      if (!fullproc_) return NOP;
+      return fullproc_(kbuf, ksiz, vbuf, vsiz, sp, opq_);
+    }
+   private:
+    KCVISITFULL fullproc_;
+    void* opq_;
+  };
+  VisitorImpl visitor(fullproc, opq);
+  return pdb->scan_parallel(&visitor, thnum);
+}
+
+
+/**
  * Set the value of a record.
  */
 int32_t kcdbset(KCDB* db, const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {

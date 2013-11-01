@@ -65,6 +65,8 @@ class MapReduce {
   static const int64_t DBMSIZ = 516LL * 4096;
   /** The page cache capacity of temprary databases. */
   static const int64_t DBPCCAP = 16LL << 20;
+  /** The default number of threads in parallel mode. */
+  static const size_t DEFTHNUM = 8;
  public:
   /**
    * Value iterator for the reducer.
@@ -129,14 +131,18 @@ class MapReduce {
    */
   enum Option {
     XNOLOCK = 1 << 0,                    ///< avoid locking against update operations
-    XNOCOMP = 1 << 1                     ///< avoid compression of temporary databases
+    XPARAMAP = 1 << 1,                   ///< run mappers in parallel
+    XPARARED = 1 << 2,                   ///< run reducers in parallel
+    XNOCOMP = 1 << 8                     ///< avoid compression of temporary databases
   };
   /**
    * Default constructor.
    */
   explicit MapReduce() :
       db_(NULL), rcomp_(NULL), tmpdbs_(NULL), dbnum_(DEFDBNUM), dbclock_(0),
-      cache_(NULL), csiz_(0), clim_(DEFCLIM), cbnum_(DEFCBNUM) {
+      mapthnum_(DEFTHNUM), redthnum_(DEFTHNUM),
+      cache_(NULL), csiz_(0), clim_(DEFCLIM), cbnum_(DEFCBNUM),
+      redtasks_(NULL), redaborted_(false), lock_(NULL) {
     _assert_(true);
   }
   /**
@@ -212,8 +218,9 @@ class MapReduce {
    * @param tmppath the path of a directory for the temporary data storage.  If it is an empty
    * string, temporary data are handled on memory.
    * @param opts the optional features by bitwise-or: MapReduce::XNOLOCK to avoid locking
-   * against update operations by other threads, MapReduce::XNOCOMP to avoid compression of
-   * temporary databases.
+   * against update operations by other threads, MapReduce::XPARAMAP to run the mapper in
+   * parallel, MapReduce::XPARARED to run the reducer in parallel, MapReduce::XNOCOMP to avoid
+   * compression of temporary databases.
    * @return true on success, or false on failure.
    */
   bool execute(BasicDB* db, const std::string& tmppath = "", uint32_t opts = 0) {
@@ -306,6 +313,7 @@ class MapReduce {
         return false;
       }
     }
+    if (opts & XPARARED) redtasks_ = new ReduceTaskQueue;
     if (opts & XNOLOCK) {
       MapChecker mapchecker;
       MapVisitor mapvisitor(this, &mapchecker, db->count());
@@ -321,13 +329,34 @@ class MapReduce {
         }
         delete cur;
       }
-      if (mapvisitor.error()) err = true;
+      if (mapvisitor.error()) {
+        db_->set_error(_KCCODELINE_, BasicDB::Error::LOGIC, "mapper failed");
+        err = true;
+      }
       mapvisitor.visit_after();
+    } else if (opts & XPARAMAP) {
+      MapChecker mapchecker;
+      MapVisitor mapvisitor(this, &mapchecker, db->count());
+      lock_ = new Mutex();
+      if (!err && !db->scan_parallel(&mapvisitor, mapthnum_, &mapchecker)) {
+        db_->set_error(_KCCODELINE_, BasicDB::Error::LOGIC, "mapper failed");
+        err = true;
+      }
+      delete lock_;
+      lock_ = NULL;
+      if (mapvisitor.error()) err = true;
     } else {
       MapChecker mapchecker;
       MapVisitor mapvisitor(this, &mapchecker, db->count());
       if (!err && !db->iterate(&mapvisitor, false, &mapchecker)) err = true;
-      if (mapvisitor.error()) err = true;
+      if (mapvisitor.error()) {
+        db_->set_error(_KCCODELINE_, BasicDB::Error::LOGIC, "mapper failed");
+        err = true;
+      }
+    }
+    if (redtasks_) {
+      delete redtasks_;
+      redtasks_ = NULL;
     }
     if (!logf("clean", "closing the temporary databases")) err = true;
     stime = time();
@@ -367,6 +396,16 @@ class MapReduce {
     cbnum_ = cbnum > 0 ? cbnum : DEFCBNUM;
     if (cbnum_ > INT16MAX) cbnum_ = nearbyprime(cbnum_);
   }
+  /**
+   * Set the thread configurations.
+   * @param mapthnum the number of threads for the mapper.
+   * @param redthnum the number of threads for the reducer.
+   */
+  void tune_thread(int32_t mapthnum, int32_t redthnum) {
+    _assert_(true);
+    mapthnum_ = mapthnum > 0 ? mapthnum : DEFTHNUM;
+    redthnum_ = redthnum > 0 ? redthnum : DEFTHNUM;
+  }
  protected:
   /**
    * Emit a record from the mapper.
@@ -385,12 +424,49 @@ class MapReduce {
     char* wp = rbuf;
     wp += writevarnum(rbuf, vsiz);
     std::memcpy(wp, vbuf, vsiz);
-    cache_->append(kbuf, ksiz, rbuf, rsiz);
+    if (lock_) {
+      lock_->lock();
+      cache_->append(kbuf, ksiz, rbuf, rsiz);
+      lock_->unlock();
+    } else {
+      cache_->append(kbuf, ksiz, rbuf, rsiz);
+    }
     if (rbuf != stack) delete[] rbuf;
     csiz_ += rsiz;
     return !err;
   }
  private:
+  /**
+   * Task queue for parallel reducer.
+   */
+  class ReduceTaskQueue : public TaskQueue {
+   public:
+    /**
+     * Task for parallel reducer.
+     */
+    class ReduceTask : public Task {
+      friend class ReduceTaskQueue;
+     public:
+      /** constructor */
+      explicit ReduceTask(MapReduce* mr, const char* kbuf, size_t ksiz, const Values& values) :
+          mr_(mr), key_(kbuf, ksiz), values_(values) {}
+     private:
+      MapReduce* mr_;                    ///< driver
+      std::string key_;                  ///< key
+      Values values_;                    ///< values
+    };
+    /** constructor */
+    explicit ReduceTaskQueue() {}
+   private:
+    /** process a task */
+    void do_task(Task* task) {
+      ReduceTask* rtask = (ReduceTask*)task;
+      ValueIterator iter(rtask->values_.begin(), rtask->values_.end());
+      if (!rtask->mr_->reduce(rtask->key_.data(), rtask->key_.size(), &iter))
+        rtask->mr_->redaborted_ = true;
+      delete rtask;
+    }
+  };
   /**
    * Checker for the map process.
    */
@@ -456,9 +532,18 @@ class MapReduce {
         checker_->stop();
         err_ = true;
       }
-      if (mr_->csiz_ >= mr_->clim_ && !mr_->flush_cache()) {
-        checker_->stop();
-        err_ = true;
+      if (mr_->lock_) {
+        mr_->lock_->lock();
+        if (mr_->csiz_ >= mr_->clim_ && !mr_->flush_cache()) {
+          checker_->stop();
+          err_ = true;
+        }
+        mr_->lock_->unlock();
+      } else {
+        if (mr_->csiz_ >= mr_->clim_ && !mr_->flush_cache()) {
+          checker_->stop();
+          err_ = true;
+        }
       }
       return NOP;
     }
@@ -540,6 +625,7 @@ class MapReduce {
     }
     if (!logf("reduce", "started the reduce process: scale=%lld", (long long)scale)) err = true;
     double stime = time();
+    if (redtasks_) redtasks_->start(redthnum_);
     std::priority_queue<MergeLine> lines;
     for (size_t i = 0; i < dbnum_; i++) {
       MergeLine line;
@@ -560,13 +646,16 @@ class MapReduce {
       MergeLine line = lines.top();
       lines.pop();
       if (lkbuf && (lksiz != line.ksiz || std::memcmp(lkbuf, line.kbuf, lksiz))) {
-        if (!call_reducer(lkbuf, lksiz, values)) err = true;
+        if (!call_reducer(lkbuf, lksiz, values)) {
+          db_->set_error(_KCCODELINE_, BasicDB::Error::LOGIC, "reducer failed");
+          err = true;
+        }
         values.clear();
       }
-      values.push_back(std::string(line.vbuf, line.vsiz));
       delete[] lkbuf;
       lkbuf = line.kbuf;
       lksiz = line.ksiz;
+      values.push_back(std::string(line.vbuf, line.vsiz));
       line.kbuf = line.cur->get(&line.ksiz, &line.vbuf, &line.vsiz, true);
       if (line.kbuf) {
         lines.push(line);
@@ -575,8 +664,10 @@ class MapReduce {
       }
     }
     if (lkbuf) {
-      if (!err && !call_reducer(lkbuf, lksiz, values)) err = true;
-      values.clear();
+      if (!err && !call_reducer(lkbuf, lksiz, values)) {
+        db_->set_error(_KCCODELINE_, BasicDB::Error::LOGIC, "reducer failed");
+        err = true;
+      }
       delete[] lkbuf;
     }
     while (!lines.empty()) {
@@ -585,6 +676,7 @@ class MapReduce {
       delete[] line.kbuf;
       delete line.cur;
     }
+    if (redtasks_) redtasks_->finish();
     double etime = time();
     if (!logf("reduce", "the reduce process finished: time=%.6f", etime - stime)) err = true;
     return !err;
@@ -598,6 +690,13 @@ class MapReduce {
    */
   bool call_reducer(const char* kbuf, size_t ksiz, const Values& values) {
     _assert_(kbuf && ksiz <= MEMMAXSIZ);
+    if (redtasks_) {
+      if (redaborted_) return false;
+      ReduceTaskQueue::ReduceTask* task =
+          new ReduceTaskQueue::ReduceTask(this, kbuf, ksiz, values);
+      redtasks_->add_task(task);
+      return true;
+    }
     bool err = false;
     ValueIterator iter(values.begin(), values.end());
     if (!reduce(kbuf, ksiz, &iter)) err = true;
@@ -617,6 +716,10 @@ class MapReduce {
   size_t dbnum_;
   /** The logical clock for temporary databases. */
   int64_t dbclock_;
+  /** The number of the mapper threads. */
+  size_t mapthnum_;
+  /** The number of the reducer threads. */
+  size_t redthnum_;
   /** The cache for emitter. */
   TinyHashMap* cache_;
   /** The current size of the cache for emitter. */
@@ -625,6 +728,12 @@ class MapReduce {
   int64_t clim_;
   /** The bucket number of the cache for emitter. */
   int64_t cbnum_;
+  /** The task queue for parallel reducer. */
+  TaskQueue* redtasks_;
+  /** The flag whether aborted. */
+  bool redaborted_;
+  /** The whole lock. */
+  Mutex* lock_;
 };
 
 

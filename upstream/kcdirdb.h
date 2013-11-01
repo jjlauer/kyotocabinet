@@ -529,6 +529,33 @@ class DirDB : public BasicDB {
     return !err;
   }
   /**
+   * Scan each record in parallel.
+   * @param visitor a visitor object.
+   * @param thnum the number of worker threads.
+   * @param checker a progress checker object.  If it is NULL, no checking is performed.
+   * @return true on success, or false on failure.
+   * @note This function is for reading records and not for updating ones.  The return value of
+   * the visitor is just ignored.  To avoid deadlock, any explicit database operation must not
+   * be performed in this function.
+   */
+  bool scan_parallel(Visitor *visitor, size_t thnum, ProgressChecker* checker = NULL) {
+    _assert_(visitor && thnum <= MEMMAXSIZ);
+    ScopedRWLock lock(&mlock_, false);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, Error::INVALID, "not opened");
+      return false;
+    }
+    if (thnum < 1) thnum = 0;
+    if (thnum > (size_t)INT8MAX) thnum = INT8MAX;
+    ScopedVisitor svis(visitor);
+    rlock_.lock_reader_all();
+    bool err = false;
+    if (!scan_parallel_impl(visitor, thnum, checker)) err = true;
+    rlock_.unlock_all();
+    trigger_meta(MetaTrigger::ITERATE, "scan_parallel");
+    return !err;
+  }
+  /**
    * Get the last happened error.
    * @return the last happened error.
    */
@@ -2029,14 +2056,14 @@ class DirDB : public BasicDB {
    */
   bool iterate_impl(Visitor* visitor, ProgressChecker* checker) {
     _assert_(visitor);
-    DirStream dir;
-    if (!dir.open(path_)) {
-      set_error(_KCCODELINE_, Error::SYSTEM, "opening a directory failed");
-      return false;
-    }
     int64_t allcnt = count_;
     if (checker && !checker->check("iterate", "beginning", 0, allcnt)) {
       set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+      return false;
+    }
+    DirStream dir;
+    if (!dir.open(path_)) {
+      set_error(_KCCODELINE_, Error::SYSTEM, "opening a directory failed");
       return false;
     }
     bool err = false;
@@ -2061,12 +2088,121 @@ class DirDB : public BasicDB {
         break;
       }
     }
+    if (!dir.close()) {
+      set_error(_KCCODELINE_, Error::SYSTEM, "closing a directory failed");
+      err = true;
+    }
     if (checker && !checker->check("iterate", "ending", -1, allcnt)) {
       set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
       err = true;
     }
+    return !err;
+  }
+  /**
+   * Scan each record in parallel.
+   * @param visitor a visitor object.
+   * @param thnum the number of worker threads.
+   * @param checker a progress checker object.
+   * @return true on success, or false on failure.
+   */
+  bool scan_parallel_impl(Visitor *visitor, size_t thnum, ProgressChecker* checker) {
+    assert(visitor && thnum <= MEMMAXSIZ);
+    int64_t allcnt = count_;
+    if (checker && !checker->check("scan_parallel", "beginning", -1, allcnt)) {
+      set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+      return false;
+    }
+    DirStream dir;
+    if (!dir.open(path_)) {
+      set_error(_KCCODELINE_, Error::SYSTEM, "opening a directory failed");
+      return false;
+    }
+    class ThreadImpl : public Thread {
+     public:
+      explicit ThreadImpl() :
+          db_(NULL), visitor_(NULL), checker_(NULL), allcnt_(0),
+          dir_(NULL), itmtx_(NULL), error_() {}
+      void init(DirDB* db, Visitor* visitor, ProgressChecker* checker, int64_t allcnt,
+                DirStream* dir, Mutex* itmtx) {
+        db_ = db;
+        visitor_ = visitor;
+        checker_ = checker;
+        allcnt_ = allcnt;
+        dir_ = dir;
+        itmtx_ = itmtx;
+      }
+      const Error& error() {
+        return error_;
+      }
+     private:
+      void run() {
+        DirDB* db = db_;
+        Visitor* visitor = visitor_;
+        ProgressChecker* checker = checker_;
+        int64_t allcnt = allcnt_;
+        DirStream* dir = dir_;
+        Mutex* itmtx = itmtx_;
+        const std::string& path = db->path_;
+        while (true) {
+          itmtx->lock();
+          std::string name;
+          if (!dir->read(&name)) {
+            itmtx->unlock();
+            break;
+          }
+          itmtx->unlock();
+          if (*name.c_str() == *KCDDBMAGICFILE) continue;
+          const std::string& rpath = path + File::PATHCHR + name;
+          Record rec;
+          if (db->read_record(rpath, &rec)) {
+            size_t vsiz;
+            visitor->visit_full(rec.kbuf, rec.ksiz, rec.vbuf, rec.vsiz, &vsiz);
+            delete[] rec.rbuf;
+          } else {
+            error_ = db->error();
+            break;
+          }
+          if (checker && !checker->check("scan_parallel", "processing", -1, allcnt)) {
+            db->set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+            error_ = db->error();
+            break;
+          }
+        }
+      }
+      DirDB* db_;
+      Visitor* visitor_;
+      ProgressChecker* checker_;
+      int64_t allcnt_;
+      DirStream* dir_;
+      Mutex* itmtx_;
+      Error error_;
+    };
+    bool err = false;
+    Mutex itmtx;
+    ThreadImpl* threads = new ThreadImpl[thnum];
+    for (size_t i = 0; i < thnum; i++) {
+      ThreadImpl* thread = threads + i;
+      thread->init(this, visitor, checker, allcnt, &dir, &itmtx);
+    }
+    for (size_t i = 0; i < thnum; i++) {
+      ThreadImpl* thread = threads + i;
+      thread->start();
+    }
+    for (size_t i = 0; i < thnum; i++) {
+      ThreadImpl* thread = threads + i;
+      thread->join();
+      if (thread->error() != Error::SUCCESS) {
+        *error_ = thread->error();
+        err = true;
+      }
+    }
+    delete[] threads;
     if (!dir.close()) {
       set_error(_KCCODELINE_, Error::SYSTEM, "closing a directory failed");
+      err = true;
+    }
+    if (checker && !checker->check("scan_parallel", "ending", -1, allcnt)) {
+      set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
       err = true;
     }
     return !err;

@@ -487,6 +487,111 @@ class StashDB : public BasicDB {
     return true;
   }
   /**
+   * Scan each record in parallel.
+   * @param visitor a visitor object.
+   * @param thnum the number of worker threads.
+   * @param checker a progress checker object.  If it is NULL, no checking is performed.
+   * @return true on success, or false on failure.
+   * @note This function is for reading records and not for updating ones.  The return value of
+   * the visitor is just ignored.  To avoid deadlock, any explicit database operation must not
+   * be performed in this function.
+   */
+  bool scan_parallel(Visitor *visitor, size_t thnum, ProgressChecker* checker = NULL) {
+    _assert_(visitor && thnum <= MEMMAXSIZ);
+    ScopedRWLock lock(&mlock_, false);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, Error::INVALID, "not opened");
+      return false;
+    }
+    if (thnum < 1) thnum = 1;
+    if (thnum > (size_t)INT8MAX) thnum = INT8MAX;
+    if (thnum > bnum_) thnum = bnum_;
+    ScopedVisitor svis(visitor);
+    int64_t allcnt = count_;
+    if (checker && !checker->check("scan_parallel", "beginning", 0, allcnt)) {
+      set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+      return false;
+    }
+    class ThreadImpl : public Thread {
+     public:
+      explicit ThreadImpl() :
+          db_(NULL), visitor_(NULL), checker_(NULL), allcnt_(0),
+          begidx_(0), endidx_(0), error_() {}
+      void init(StashDB* db, Visitor* visitor, ProgressChecker* checker, int64_t allcnt,
+                size_t begidx, size_t endidx) {
+        db_ = db;
+        visitor_ = visitor;
+        checker_ = checker;
+        allcnt_ = allcnt;
+        begidx_ = begidx;
+        endidx_ = endidx;
+      }
+      const Error& error() {
+        return error_;
+      }
+     private:
+      void run() {
+        StashDB* db = db_;
+        Visitor* visitor = visitor_;
+        ProgressChecker* checker = checker_;
+        int64_t allcnt = allcnt_;
+        size_t endidx = endidx_;
+        char** buckets = db->buckets_;
+        for (size_t i = begidx_; i < endidx; i++) {
+          char* rbuf = buckets[i];
+          while (rbuf) {
+            Record rec(rbuf);
+            rbuf = rec.child_;
+            size_t vsiz;
+            visitor->visit_full(rec.kbuf_, rec.ksiz_, rec.vbuf_, rec.vsiz_, &vsiz);
+            if (checker && !checker->check("scan_parallel", "processing", -1, allcnt)) {
+              db->set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+              error_ = db->error();
+              break;
+            }
+          }
+        }
+      }
+      StashDB* db_;
+      Visitor* visitor_;
+      ProgressChecker* checker_;
+      int64_t allcnt_;
+      size_t begidx_;
+      size_t endidx_;
+      Error error_;
+    };
+    bool err = false;
+    rlock_.lock_reader_all();
+    ThreadImpl* threads = new ThreadImpl[thnum];
+    double range = (double)bnum_ / thnum;
+    for (size_t i = 0; i < thnum; i++) {
+      size_t cidx = i * range;
+      size_t nidx = (i + 1) * range;
+      if (i < 1) cidx = 0;
+      if (i >= thnum - 1) nidx = bnum_;
+      ThreadImpl* thread = threads + i;
+      thread->init(this, visitor, checker, allcnt, cidx, nidx);
+      thread->start();
+    }
+    for (size_t i = 0; i < thnum; i++) {
+      ThreadImpl* thread = threads + i;
+      thread->join();
+      if (thread->error() != Error::SUCCESS) {
+        *error_ = thread->error();
+        err = true;
+      }
+    }
+    delete[] threads;
+    rlock_.unlock_all();
+    if (err) return false;
+    if (checker && !checker->check("scan_parallel", "ending", -1, allcnt)) {
+      set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+      return false;
+    }
+    trigger_meta(MetaTrigger::ITERATE, "scan_parallel");
+    return true;
+  }
+  /**
    * Get the last happened error.
    * @return the last happened error.
    */

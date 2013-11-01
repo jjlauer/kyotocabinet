@@ -79,6 +79,7 @@ inline long double modfl(long double val, long double* iptr) {
 
 namespace std {
 using ::modfl;
+using ::log2;
 using ::snprintf;
 }
 

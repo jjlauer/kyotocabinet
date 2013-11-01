@@ -722,6 +722,34 @@ class HashDB : public BasicDB {
     return !err;
   }
   /**
+   * Scan each record in parallel.
+   * @param visitor a visitor object.
+   * @param thnum the number of worker threads.
+   * @param checker a progress checker object.  If it is NULL, no checking is performed.
+   * @return true on success, or false on failure.
+   * @note This function is for reading records and not for updating ones.  The return value of
+   * the visitor is just ignored.  To avoid deadlock, any explicit database operation must not
+   * be performed in this function.
+   */
+  bool scan_parallel(Visitor *visitor, size_t thnum, ProgressChecker* checker = NULL) {
+    _assert_(visitor && thnum <= MEMMAXSIZ);
+    ScopedRWLock lock(&mlock_, false);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, Error::INVALID, "not opened");
+      return false;
+    }
+    if (thnum < 1) thnum = 1;
+    if (thnum > (size_t)INT8MAX) thnum = INT8MAX;
+    if ((int64_t)thnum > bnum_) thnum = bnum_;
+    ScopedVisitor svis(visitor);
+    rlock_.lock_reader_all();
+    bool err = false;
+    if (!scan_parallel_impl(visitor, thnum, checker)) err = true;
+    rlock_.unlock_all();
+    trigger_meta(MetaTrigger::ITERATE, "scan_parallel");
+    return !err;
+  }
+  /**
    * Get the last happened error.
    * @return the last happened error.
    */
@@ -2212,6 +2240,138 @@ class HashDB : public BasicDB {
       return false;
     }
     return true;
+  }
+  /**
+   * Scan each record in parallel.
+   * @param visitor a visitor object.
+   * @param thnum the number of worker threads.
+   * @param checker a progress checker object.
+   * @return true on success, or false on failure.
+   */
+  bool scan_parallel_impl(Visitor *visitor, size_t thnum, ProgressChecker* checker) {
+    assert(visitor && thnum <= MEMMAXSIZ);
+    int64_t allcnt = count_;
+    if (checker && !checker->check("scan_parallel", "beginning", -1, allcnt)) {
+      set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+      return false;
+    }
+    bool err = false;
+    std::vector<int64_t> offs;
+    int64_t bnum = bnum_;
+    size_t cap = (thnum + 1) * INT8MAX;
+    for (int64_t bidx = 0; bidx < bnum; bidx++) {
+      int64_t off = get_bucket(bidx);
+      if (off > 0) {
+        offs.push_back(off);
+        if (offs.size() >= cap) break;
+      }
+    }
+    if (!offs.empty()) {
+      std::sort(offs.begin(), offs.end());
+      if (thnum > offs.size()) thnum = offs.size();
+      class ThreadImpl : public Thread {
+       public:
+        explicit ThreadImpl() :
+            db_(NULL), visitor_(NULL), checker_(NULL), allcnt_(0),
+            begoff_(0), endoff_(0), error_() {}
+        void init(HashDB* db, Visitor* visitor, ProgressChecker* checker, int64_t allcnt,
+                  int64_t begoff, int64_t endoff) {
+          db_ = db;
+          visitor_ = visitor;
+          checker_ = checker;
+          allcnt_ = allcnt;
+          begoff_ = begoff;
+          endoff_ = endoff;
+        }
+        const Error& error() {
+          return error_;
+        }
+       private:
+        void run() {
+          HashDB* db = db_;
+          Visitor* visitor = visitor_;
+          ProgressChecker* checker = checker_;
+          int64_t off = begoff_;
+          int64_t end = endoff_;
+          int64_t allcnt = allcnt_;
+          Compressor* comp = db->comp_;
+          Record rec;
+          char rbuf[RECBUFSIZ];
+          while (off > 0 && off < end) {
+            rec.off = off;
+            if (!db->read_record(&rec, rbuf)) {
+              error_ = db->error();
+              break;
+            }
+            if (rec.psiz == UINT16MAX) {
+              off += rec.rsiz;
+            } else {
+              if (!rec.vbuf && !db->read_record_body(&rec)) {
+                delete[] rec.bbuf;
+                error_ = db->error();
+                break;
+              }
+              const char* vbuf = rec.vbuf;
+              size_t vsiz = rec.vsiz;
+              char* zbuf = NULL;
+              size_t zsiz = 0;
+              if (comp) {
+                zbuf = comp->decompress(vbuf, vsiz, &zsiz);
+                if (!zbuf) {
+                  db->set_error(_KCCODELINE_, Error::SYSTEM, "data decompression failed");
+                  delete[] rec.bbuf;
+                  error_ = db->error();
+                  break;
+                }
+                vbuf = zbuf;
+                vsiz = zsiz;
+              }
+              visitor->visit_full(rec.kbuf, rec.ksiz, vbuf, vsiz, &vsiz);
+              delete[] zbuf;
+              delete[] rec.bbuf;
+              off += rec.rsiz;
+              if (checker && !checker->check("scan_parallel", "processing", -1, allcnt)) {
+                db->set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+                error_ = db->error();
+                break;
+              }
+            }
+          }
+        }
+        HashDB* db_;
+        Visitor* visitor_;
+        ProgressChecker* checker_;
+        int64_t allcnt_;
+        int64_t begoff_;
+        int64_t endoff_;
+        Error error_;
+      };
+      ThreadImpl* threads = new ThreadImpl[thnum];
+      double range = (double)offs.size() / thnum;
+      for (size_t i = 0; i < thnum; i++) {
+        int64_t cidx = i * range;
+        int64_t nidx = (i + 1) * range;
+        int64_t begoff = i < 1 ? roff_ : offs[cidx];
+        int64_t endoff = i < thnum - 1 ? offs[nidx] : (int64_t)lsiz_;
+        ThreadImpl* thread = threads + i;
+        thread->init(this, visitor, checker, allcnt, begoff, endoff);
+        thread->start();
+      }
+      for (size_t i = 0; i < thnum; i++) {
+        ThreadImpl* thread = threads + i;
+        thread->join();
+        if (thread->error() != Error::SUCCESS) {
+          *error_ = thread->error();
+          err = true;
+        }
+      }
+      delete[] threads;
+    }
+    if (checker && !checker->check("scan_parallel", "ending", -1, allcnt)) {
+      set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+      err = true;
+    }
+    return !err;
   }
   /**
    * Synchronize updated contents with the file and the device.

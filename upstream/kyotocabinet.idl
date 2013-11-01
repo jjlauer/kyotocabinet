@@ -136,6 +136,7 @@ module kyotocabinet {
     boolean accept(in string key, inout Visitor visitor, in boolean writable);
     boolean accept_bulk(in List keys, inout Visitor visitor, in boolean writable);
     boolean iterate(inout Visitor visitor, in boolean writable);
+    boolean scan_parallel(inout Visitor visitor, in long thnum);
     boolean set(in string key, in string value);
     boolean add(in string key, in string value);
     boolean replace(in string key, in string value);

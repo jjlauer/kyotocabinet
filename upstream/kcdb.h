@@ -1133,6 +1133,18 @@ class BasicDB : public DB {
   virtual bool iterate(Visitor *visitor, bool writable = true,
                        ProgressChecker* checker = NULL) = 0;
   /**
+   * Scan each record in parallel.
+   * @param visitor a visitor object.
+   * @param thnum the number of worker threads.
+   * @param checker a progress checker object.  If it is NULL, no checking is performed.
+   * @return true on success, or false on failure.
+   * @note This function is for reading records and not for updating ones.  The return value of
+   * the visitor is just ignored.  To avoid deadlock, any explicit database operation must not
+   * be performed in this function.
+   */
+  virtual bool scan_parallel(Visitor *visitor, size_t thnum,
+                             ProgressChecker* checker = NULL) = 0;
+  /**
    * Synchronize updated contents with the file and the device.
    * @param hard true for physical synchronization with the device, or false for logical
    * synchronization with the file system.

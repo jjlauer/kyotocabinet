@@ -416,9 +416,24 @@ int32_t kcdbacceptbulk(KCDB* db, const KCSTR* keys, size_t knum,
  * @param opq an opaque pointer to be given to the call back function.
  * @param writable true for writable operation, or false for read-only operation.
  * @return true on success, or false on failure.
- * @note The whole iteration is performed atomically and other threads are blocked.
+ * @note The whole iteration is performed atomically and other threads are blocked.  To avoid
+ * deadlock, any explicit database operation must not be performed in this function.
  */
 int32_t kcdbiterate(KCDB* db, KCVISITFULL fullproc, void* opq, int32_t writable);
+
+
+/**
+ * Scan each record in parallel.
+ * @param db a database object.
+ * @param fullproc a call back function to visit a record.
+ * @param opq an opaque pointer to be given to the call back function.
+ * @param thnum the number of worker threads.
+ * @return true on success, or false on failure.
+ * @note This function is for reading records and not for updating ones.  The return value of
+ * the visitor is just ignored.  To avoid deadlock, any explicit database operation must not
+ * be performed in this function.
+ */
+int32_t kcdbscanpara(KCDB* db, KCVISITFULL fullproc, void* opq, size_t thnum);
 
 
 /**
