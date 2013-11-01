@@ -14,6 +14,7 @@
 
 
 #include "kcpolydb.h"
+#include "kcdbext.h"
 #include "kclangc.h"
 #include "myconf.h"
 
@@ -470,16 +471,6 @@ int64_t kcdbgetbulk(KCDB* db, const KCSTR* keys, size_t knum, KCREC* recs, int32
 
 
 /**
- * Remove all records.
- */
-int32_t kcdbclear(KCDB* db) {
-  _assert_(db);
-  PolyDB* pdb = (PolyDB*)db;
-  return pdb->clear();
-}
-
-
-/**
  * Synchronize updated contents with the file and the device.
  */
 int32_t kcdbsync(KCDB* db, int32_t hard, KCFILEPROC proc, void* opq) {
@@ -560,6 +551,16 @@ int32_t kcdbendtran(KCDB* db, int32_t commit) {
   _assert_(db);
   PolyDB* pdb = (PolyDB*)db;
   return pdb->end_transaction(commit);
+}
+
+
+/**
+ * Remove all records.
+ */
+int32_t kcdbclear(KCDB* db) {
+  _assert_(db);
+  PolyDB* pdb = (PolyDB*)db;
+  return pdb->clear();
 }
 
 
@@ -877,6 +878,224 @@ const char* kccuremsg(KCCUR* cur) {
   _assert_(cur);
   PolyDB::Cursor* pcur = (PolyDB::Cursor*)cur;
   return pcur->error().message();
+}
+
+
+/**
+ * Create an index database object.
+ */
+KCIDX* kcidxnew(void) {
+  _assert_(true);
+  return (KCIDX*)new IndexDB;
+}
+
+
+/**
+ * Destroy a database object.
+ */
+void kcidxdel(KCIDX* idx) {
+  _assert_(idx);
+  IndexDB* idb = (IndexDB*)idx;
+  delete idb;
+}
+
+
+/**
+ * Open a database file.
+ */
+int32_t kcidxopen(KCIDX* idx, const char* path, uint32_t mode) {
+  _assert_(idx && path);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->open(path, mode);
+}
+
+
+/**
+ * Close the database file.
+ */
+int32_t kcidxclose(KCIDX* idx) {
+  _assert_(idx);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->close();
+}
+
+
+/**
+ * Get the code of the last happened error.
+ */
+int32_t kcidxecode(KCIDX* idx) {
+  _assert_(idx);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->error().code();
+}
+
+
+/**
+ * Get the supplement message of the last happened error.
+ */
+const char* kcidxemsg(KCIDX* idx) {
+  _assert_(idx);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->error().message();
+}
+
+
+/**
+ * Set the value of a record.
+ */
+int32_t kcidxset(KCIDX* idx, const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
+  _assert_(idx && kbuf && ksiz <= MEMMAXSIZ && vbuf && vsiz <= MEMMAXSIZ);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->set(kbuf, ksiz, vbuf, vsiz);
+}
+
+
+/**
+ * Add a record.
+ */
+int32_t kcidxadd(KCIDX* idx, const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
+  _assert_(idx && kbuf && ksiz <= MEMMAXSIZ && vbuf && vsiz <= MEMMAXSIZ);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->add(kbuf, ksiz, vbuf, vsiz);
+}
+
+
+/**
+ * Replace the value of a record.
+ */
+int32_t kcidxreplace(KCIDX* idx, const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
+  _assert_(idx && kbuf && ksiz <= MEMMAXSIZ && vbuf && vsiz <= MEMMAXSIZ);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->replace(kbuf, ksiz, vbuf, vsiz);
+}
+
+
+/**
+ * Append the value of a record.
+ */
+int32_t kcidxappend(KCIDX* idx, const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
+  _assert_(idx && kbuf && ksiz <= MEMMAXSIZ && vbuf && vsiz <= MEMMAXSIZ);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->append(kbuf, ksiz, vbuf, vsiz);
+}
+
+
+/**
+ * Remove a record.
+ */
+int32_t kcidxremove(KCIDX* idx, const char* kbuf, size_t ksiz) {
+  _assert_(idx && kbuf && ksiz <= MEMMAXSIZ);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->remove(kbuf, ksiz);
+}
+
+
+/**
+ * Retrieve the value of a record.
+ */
+char* kcidxget(KCIDX* idx, const char* kbuf, size_t ksiz, size_t* sp) {
+  _assert_(idx && kbuf && ksiz <= MEMMAXSIZ && sp);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->get(kbuf, ksiz, sp);
+}
+
+
+/**
+ * Synchronize updated contents with the file and the device.
+ */
+int32_t kcidxsync(KCIDX* idx, int32_t hard, KCFILEPROC proc, void* opq) {
+  _assert_(idx);
+  IndexDB* idb = (IndexDB*)idx;
+  class FileProcessorImpl : public BasicDB::FileProcessor {
+   public:
+    explicit FileProcessorImpl(KCFILEPROC proc, void* opq) : proc_(proc), opq_(opq) {}
+    bool process(const std::string& path, int64_t count, int64_t size) {
+      if (!proc_) return true;
+      return proc_(path.c_str(), count, size, opq_);
+    }
+   private:
+    KCFILEPROC proc_;
+    void* opq_;
+  };
+  FileProcessorImpl myproc(proc, opq);
+  return idb->synchronize(hard, &myproc);
+}
+
+
+/**
+ * Remove all records.
+ */
+int32_t kcidxclear(KCIDX* idx) {
+  _assert_(idx);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->clear();
+}
+
+
+/**
+ * Get the number of records.
+ */
+int64_t kcidxcount(KCIDX* idx) {
+  _assert_(idx);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->count();
+}
+
+
+/**
+ * Get the size of the database file.
+ */
+int64_t kcidxsize(KCIDX* idx) {
+  _assert_(idx);
+  IndexDB* idb = (IndexDB*)idx;
+  return idb->size();
+}
+
+
+/**
+ * Get the path of the database file.
+ */
+char* kcidxpath(KCIDX* idx) {
+  _assert_(idx);
+  IndexDB* idb = (IndexDB*)idx;
+  std::string path = idb->path();
+  size_t psiz = path.size();
+  char* pbuf = new char[psiz+1];
+  std::memcpy(pbuf, path.c_str(), psiz + 1);
+  return pbuf;
+}
+
+
+/**
+ * Get the miscellaneous status information.
+ */
+char* kcidxstatus(KCIDX* idx) {
+  _assert_(idx);
+  IndexDB* idb = (IndexDB*)idx;
+  std::map<std::string, std::string> status;
+  if (!idb->status(&status)) return NULL;
+  std::ostringstream obuf;
+  std::map<std::string, std::string>::iterator it = status.begin();
+  std::map<std::string, std::string>::iterator itend = status.end();
+  while (it != itend) {
+    obuf << it->first << "\t" << it->second << "\n";
+    ++it;
+  }
+  std::string sstr = obuf.str();
+  size_t ssiz = sstr.size();
+  char* sbuf = new char[ssiz+1];
+  std::memcpy(sbuf, sstr.c_str(), ssiz + 1);
+  return sbuf;
+}
+
+
+/**
+ * Reveal the inner database object.
+ */
+KCDB* kcidxrevealinnerdb(KCIDX* idx) {
+  _assert_(idx);
+  IndexDB* idb = (IndexDB*)idx;
+  return (KCDB*)idb->reveal_inner_db();
 }
 
 

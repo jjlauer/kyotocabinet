@@ -44,13 +44,19 @@ static void oprintf(const char* format, ...);
 static void oputchar(char c);
 static void eprintf(const char* format, ...);
 static void dberrprint(KCDB* db, int32_t line, const char* func);
+static void idxerrprint(KCIDX* idx, int32_t line, const char* func);
+static void dbmetaprint(KCDB* db, int32_t verbose);
+static void idxmetaprint(KCIDX* idx, int32_t verbose);
 const char* visitfull(const char* kbuf, size_t ksiz,
                       const char* vbuf, size_t vsiz, size_t* sp, void* opq);
 static int32_t runorder(int argc, char** argv);
+static int32_t runindex(int argc, char** argv);
 static int32_t runmap(int argc, char** argv);
 static int32_t runlist(int argc, char** argv);
 static int32_t procorder(const char* path, int64_t rnum, int32_t rnd, int32_t etc,
                          int32_t tran, int32_t oflags);
+static int32_t procindex(const char* path, int64_t rnum, int32_t rnd, int32_t etc,
+                         int32_t oflags);
 static int32_t procmap(int64_t rnum, int32_t rnd, int32_t etc, int64_t bnum);
 static int32_t proclist(int64_t rnum, int32_t rnd, int32_t etc);
 
@@ -64,6 +70,8 @@ int main(int argc, char **argv) {
   rv = 0;
   if (!strcmp(argv[1], "order")) {
     rv = runorder(argc, argv);
+  } else if (!strcmp(argv[1], "index")) {
+    rv = runindex(argc, argv);
   } else if (!strcmp(argv[1], "map")) {
     rv = runmap(argc, argv);
   } else if (!strcmp(argv[1], "list")) {
@@ -89,6 +97,7 @@ static void usage() {
   eprintf("usage:\n");
   eprintf("  %s order [-rnd] [-etc] [-tran] [-oat|-oas|-onl|-otl|-onr] path rnum\n",
           g_progname);
+  eprintf("  %s index [-rnd] [-etc] [-oat|-oas|-onl|-otl|-onr] path rnum\n", g_progname);
   eprintf("  %s map [-rnd] [-etc] [-bnum num] rnum\n", g_progname);
   eprintf("  %s list [-rnd] [-etc] rnum\n", g_progname);
   eprintf("\n");
@@ -148,6 +157,12 @@ static void dberrprint(KCDB* db, int32_t line, const char* func) {
 }
 
 
+/* print error message of database */
+static void idxerrprint(KCIDX* idx, int32_t line, const char* func) {
+  dberrprint(kcidxrevealinnerdb(idx), line, func);
+}
+
+
 /* print members of database */
 static void dbmetaprint(KCDB* db, int32_t verbose) {
   char* status, *rp;
@@ -169,6 +184,12 @@ static void dbmetaprint(KCDB* db, int32_t verbose) {
     oprintf("count: %ld\n", (long)kcdbcount(db));
     oprintf("size: %ld\n", (long)kcdbsize(db));
   }
+}
+
+
+/* print members of database */
+static void idxmetaprint(KCIDX* idx, int32_t verbose) {
+  dbmetaprint(kcidxrevealinnerdb(idx), verbose);
 }
 
 
@@ -250,6 +271,55 @@ static int32_t runorder(int argc, char** argv) {
   rnum = kcatoix(rstr);
   if (rnum < 1) usage();
   return procorder(path, rnum, rnd, etc, tran, oflags);
+}
+
+
+/* parse arguments of index command */
+static int32_t runindex(int argc, char** argv) {
+  int32_t argbrk = FALSE;
+  const char* path, *rstr;
+  int32_t rnd, etc, mode, oflags, i;
+  int64_t rnum;
+  path = NULL;
+  rstr = NULL;
+  rnd = FALSE;
+  etc = FALSE;
+  mode = 0;
+  oflags = 0;
+  for (i = 2; i < argc; i++) {
+    if (!argbrk && argv[i][0] == '-') {
+      if (!strcmp(argv[i], "--")) {
+        argbrk = TRUE;
+      } else if (!strcmp(argv[i], "-rnd")) {
+        rnd = TRUE;
+      } else if (!strcmp(argv[i], "-etc")) {
+        etc = TRUE;
+      } else if (!strcmp(argv[i], "-oat")) {
+        oflags |= KCOAUTOTRAN;
+      } else if (!strcmp(argv[i], "-oas")) {
+        oflags |= KCOAUTOSYNC;
+      } else if (!strcmp(argv[i], "-onl")) {
+        oflags |= KCONOLOCK;
+      } else if (!strcmp(argv[i], "-otl")) {
+        oflags |= KCOTRYLOCK;
+      } else if (!strcmp(argv[i], "-onr")) {
+        oflags |= KCONOREPAIR;
+      } else {
+        usage();
+      }
+    } else if (!path) {
+      argbrk = TRUE;
+      path = argv[i];
+    } else if (!rstr) {
+      rstr = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if (!path || !rstr) usage();
+  rnum = kcatoix(rstr);
+  if (rnum < 1) usage();
+  return procindex(path, rnum, rnd, etc, oflags);
 }
 
 
@@ -679,6 +749,145 @@ static int32_t procorder(const char* path, int64_t rnum, int32_t rnd, int32_t et
   etime = kctime();
   oprintf("time: %.3f\n", etime - stime);
   kcdbdel(db);
+  oprintf("%s\n\n", err ? "error" : "ok");
+  return err ? 1 : 0;
+}
+
+
+/* perform index command */
+static int32_t procindex(const char* path, int64_t rnum, int32_t rnd, int32_t etc,
+                         int32_t oflags) {
+  KCIDX* idx;
+  int32_t err;
+  char kbuf[RECBUFSIZ], *vbuf;
+  size_t ksiz, vsiz;
+  int64_t i;
+  double stime, etime;
+  oprintf("<Index Database Test>\n  path=%s  rnum=%ld  rnd=%d  etc=%d  oflags=%d\n\n",
+          path, (long)rnum, rnd, etc, oflags);
+  err = FALSE;
+  idx = kcidxnew();
+  oprintf("opening the database:\n");
+  stime = kctime();
+  if (!kcidxopen(idx, path, KCOWRITER | KCOCREATE | KCOTRUNCATE | oflags)) {
+    idxerrprint(idx, __LINE__, "kcidxopen");
+    err = TRUE;
+  }
+  etime = kctime();
+  idxmetaprint(idx, FALSE);
+  oprintf("time: %.3f\n", etime - stime);
+  oprintf("setting records:\n");
+  stime = kctime();
+  for (i = 1; !err && i <= rnum; i++) {
+    ksiz = sprintf(kbuf, "%08ld", (long)(rnd ? myrand(rnum) + 1 : i));
+    if (!kcidxset(idx, kbuf, ksiz, kbuf, ksiz)) {
+      idxerrprint(idx, __LINE__, "kcidxset");
+      err = TRUE;
+    }
+    if (rnum > 250 && i % (rnum / 250) == 0) {
+      oputchar('.');
+      if (i == rnum || i % (rnum / 10) == 0) oprintf(" (%08ld)\n", (long)i);
+    }
+  }
+  etime = kctime();
+  idxmetaprint(idx, FALSE);
+  oprintf("time: %.3f\n", etime - stime);
+  if (etc) {
+    oprintf("adding records:\n");
+    stime = kctime();
+    for (i = 1; !err && i <= rnum; i++) {
+      ksiz = sprintf(kbuf, "%08ld", (long)(rnd ? myrand(rnum) + 1 : i));
+      if (!kcidxadd(idx, kbuf, ksiz, kbuf, ksiz) && kcidxecode(idx) != KCEDUPREC) {
+        idxerrprint(idx, __LINE__, "kcidxadd");
+        err = TRUE;
+      }
+      if (rnum > 250 && i % (rnum / 250) == 0) {
+        oputchar('.');
+        if (i == rnum || i % (rnum / 10) == 0) oprintf(" (%08ld)\n", (long)i);
+      }
+    }
+    etime = kctime();
+    idxmetaprint(idx, FALSE);
+    oprintf("time: %.3f\n", etime - stime);
+  }
+  if (etc) {
+    oprintf("appending records:\n");
+    stime = kctime();
+    for (i = 1; !err && i <= rnum; i++) {
+      ksiz = sprintf(kbuf, "%08ld", (long)(rnd ? myrand(rnum) + 1 : i));
+      if (!kcidxappend(idx, kbuf, ksiz, kbuf, ksiz)) {
+        idxerrprint(idx, __LINE__, "kcidxadd");
+        err = TRUE;
+      }
+      if (rnum > 250 && i % (rnum / 250) == 0) {
+        oputchar('.');
+        if (i == rnum || i % (rnum / 10) == 0) oprintf(" (%08ld)\n", (long)i);
+      }
+    }
+    etime = kctime();
+    idxmetaprint(idx, FALSE);
+    oprintf("time: %.3f\n", etime - stime);
+  }
+  oprintf("getting records:\n");
+  stime = kctime();
+  for (i = 1; !err && i <= rnum; i++) {
+    ksiz = sprintf(kbuf, "%08ld", (long)(rnd ? myrand(rnum) + 1 : i));
+    vbuf = kcidxget(idx, kbuf, ksiz, &vsiz);
+    if (vbuf) {
+      if (vsiz < ksiz || memcmp(vbuf, kbuf, ksiz)) {
+        idxerrprint(idx, __LINE__, "kcidxget");
+        err = TRUE;
+      }
+      kcfree(vbuf);
+    } else if (!rnd || kcidxecode(idx) != KCENOREC) {
+      idxerrprint(idx, __LINE__, "kcidxget");
+      err = TRUE;
+    }
+    if (rnum > 250 && i % (rnum / 250) == 0) {
+      oputchar('.');
+      if (i == rnum || i % (rnum / 10) == 0) oprintf(" (%08ld)\n", (long)i);
+    }
+  }
+  etime = kctime();
+  idxmetaprint(idx, FALSE);
+  oprintf("time: %.3f\n", etime - stime);
+  if (etc) {
+    oprintf("synchronizing the database:\n");
+    stime = kctime();
+    if (!kcidxsync(idx, FALSE, NULL, NULL)) {
+      idxerrprint(idx, __LINE__, "kcidxsync");
+      err = TRUE;
+    }
+    etime = kctime();
+    idxmetaprint(idx, FALSE);
+    oprintf("time: %.3f\n", etime - stime);
+  }
+  oprintf("removing records:\n");
+  stime = kctime();
+  for (i = 1; !err && i <= rnum; i++) {
+    ksiz = sprintf(kbuf, "%08ld", (long)(rnd ? myrand(rnum) + 1 : i));
+    if (!kcidxremove(idx, kbuf, ksiz) &&
+        ((!rnd && !etc) || kcidxecode(idx) != KCENOREC)) {
+      idxerrprint(idx, __LINE__, "kcidxremove");
+      err = TRUE;
+    }
+    if (rnum > 250 && i % (rnum / 250) == 0) {
+      oputchar('.');
+      if (i == rnum || i % (rnum / 10) == 0) oprintf(" (%08ld)\n", (long)i);
+    }
+  }
+  etime = kctime();
+  idxmetaprint(idx, TRUE);
+  oprintf("time: %.3f\n", etime - stime);
+  oprintf("closing the database:\n");
+  stime = kctime();
+  if (!kcidxclose(idx)) {
+    idxerrprint(idx, __LINE__, "kcidxclose");
+    err = TRUE;
+  }
+  etime = kctime();
+  oprintf("time: %.3f\n", etime - stime);
+  kcidxdel(idx);
   oprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }

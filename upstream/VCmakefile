@@ -716,6 +716,13 @@ check-langc :
 	  "casket.kch#bnum=5000#msiz=50000#dfunit=2" 10000
 	kclangctest order -rnd -etc -oat -tran \
 	  "casket.kch#bnum=5000#msiz=50000#dfunit=2#zcomp=arcz" 10000
+	kclangctest index "casket.kct#bnum=5000#msiz=50000" 10000
+	kclangctest index -etc \
+	  "casket.kct#bnum=5000#msiz=50000#dfunit=2" 10000
+	kclangctest index -rnd -etc \
+	  "casket.kct#bnum=5000#msiz=50000#dfunit=2" 10000
+	kclangctest index -rnd -etc -oat \
+	  "casket.kct#bnum=5000#msiz=50000#dfunit=2#zcomp=arcz" 10000
 	kclangctest map 10000
 	kclangctest map -etc -bnum 1000 10000
 	kclangctest map -etc -rnd -bnum 1000 10000

@@ -45,7 +45,7 @@ extern "C" {
 /**
  * C wrapper of polymorphic database.
  */
-typedef union {
+typedef struct {
   void* db;                              /**< dummy member */
 } KCDB;
 
@@ -53,7 +53,7 @@ typedef union {
 /**
  * C wrapper of polymorphic cursor.
  */
-typedef union {
+typedef struct {
   void* cur;                             /**< dummy member */
 } KCCUR;
 
@@ -591,14 +591,6 @@ int64_t kcdbgetbulk(KCDB* db, const KCSTR* keys, size_t knum, KCREC* recs, int32
 
 
 /**
- * Remove all records.
- * @param db a database object.
- * @return true on success, or false on failure.
- */
-int32_t kcdbclear(KCDB* db);
-
-
-/**
  * Synchronize updated contents with the file and the device.
  * @param db a database object.
  * @param hard true for physical synchronization with the device, or false for logical
@@ -664,6 +656,14 @@ int32_t kcdbbegintrantry(KCDB* db, int32_t hard);
  * @return true on success, or false on failure.
  */
 int32_t kcdbendtran(KCDB* db, int32_t commit);
+
+
+/**
+ * Remove all records.
+ * @param db a database object.
+ * @return true on success, or false on failure.
+ */
+int32_t kcdbclear(KCDB* db);
 
 
 /**
@@ -946,9 +946,218 @@ const char* kccuremsg(KCCUR* cur);
 
 
 /**
+ * C wrapper of index database.
+ */
+typedef struct {
+  void* db;                              /**< dummy member */
+} KCIDX;
+
+
+/**
+ * Create an index database object.
+ * @return the created database object.
+ * @note The object of the return value should be released with the kcidxdel function when it is
+ * no longer in use.
+ */
+KCIDX* kcidxnew(void);
+
+
+/**
+ * Destroy a database object.
+ * @param idx the database object.
+ */
+void kcidxdel(KCIDX* idx);
+
+
+/**
+ * Open a database file.
+ * @param idx a database object.
+ * @param path the path of a database file.  The same as with the polymorphic database.
+ * @param mode the connection mode.  The same as with the polymorphic database.
+ * @return true on success, or false on failure.
+ */
+int32_t kcidxopen(KCIDX* idx, const char* path, uint32_t mode);
+
+
+/**
+ * Close the database file.
+ * @param idx a database object.
+ * @return true on success, or false on failure.
+ */
+int32_t kcidxclose(KCIDX* idx);
+
+
+/**
+ * Get the code of the last happened error.
+ * @param idx a database object.
+ * @return the code of the last happened error.
+ */
+int32_t kcidxecode(KCIDX* idx);
+
+
+/**
+ * Get the supplement message of the last happened error.
+ * @param idx a database object.
+ * @return the supplement message of the last happened error.
+ */
+const char* kcidxemsg(KCIDX* idx);
+
+
+/**
+ * Set the value of a record.
+ * @param idx a database object.
+ * @param kbuf the pointer to the key region.
+ * @param ksiz the size of the key region.
+ * @param vbuf the pointer to the value region.
+ * @param vsiz the size of the value region.
+ * @return true on success, or false on failure.
+ * @note If no record corresponds to the key, a new record is created.  If the corresponding
+ * record exists, the value is overwritten.
+ */
+int32_t kcidxset(KCIDX* idx, const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz);
+
+
+/**
+ * Add a record.
+ * @param idx a database object.
+ * @param kbuf the pointer to the key region.
+ * @param ksiz the size of the key region.
+ * @param vbuf the pointer to the value region.
+ * @param vsiz the size of the value region.
+ * @return true on success, or false on failure.
+ * @note If no record corresponds to the key, a new record is created.  If the corresponding
+ * record exists, the record is not modified and false is returned.
+ */
+int32_t kcidxadd(KCIDX* idx, const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz);
+
+
+/**
+ * Replace the value of a record.
+ * @param idx a database object.
+ * @param kbuf the pointer to the key region.
+ * @param ksiz the size of the key region.
+ * @param vbuf the pointer to the value region.
+ * @param vsiz the size of the value region.
+ * @return true on success, or false on failure.
+ * @note If no record corresponds to the key, no new record is created and false is returned.
+ * If the corresponding record exists, the value is modified.
+ */
+int32_t kcidxreplace(KCIDX* idx, const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz);
+
+
+/**
+ * Append the value of a record.
+ * @param idx a database object.
+ * @param kbuf the pointer to the key region.
+ * @param ksiz the size of the key region.
+ * @param vbuf the pointer to the value region.
+ * @param vsiz the size of the value region.
+ * @return true on success, or false on failure.
+ * @note If no record corresponds to the key, a new record is created.  If the corresponding
+ * record exists, the given value is appended at the end of the existing value.
+ */
+int32_t kcidxappend(KCIDX* idx, const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz);
+
+
+/**
+ * Remove a record.
+ * @param idx a database object.
+ * @param kbuf the pointer to the key region.
+ * @param ksiz the size of the key region.
+ * @return true on success, or false on failure.
+ * @note If no record corresponds to the key, false is returned.
+ */
+int32_t kcidxremove(KCIDX* idx, const char* kbuf, size_t ksiz);
+
+
+/**
+ * Retrieve the value of a record.
+ * @param idx a database object.
+ * @param kbuf the pointer to the key region.
+ * @param ksiz the size of the key region.
+ * @param sp the pointer to the variable into which the size of the region of the return
+ * value is assigned.
+ * @return the pointer to the value region of the corresponding record, or NULL on failure.
+ * @note If no record corresponds to the key, NULL is returned.  Because an additional zero
+ * code is appended at the end of the region of the return value, the return value can be
+ * treated as a C-style string.  The region of the return value should be released with the
+ * kcfree function when it is no longer in use.
+ */
+char* kcidxget(KCIDX* idx, const char* kbuf, size_t ksiz, size_t* sp);
+
+
+/**
+ * Synchronize updated contents with the file and the device.
+ * @param idx a database object.
+ * @param hard true for physical synchronization with the device, or false for logical
+ * synchronization with the file system.
+ * @param proc a postprocessor call back function.  If it is NULL, no postprocessing is
+ * performed.
+ * @param opq an opaque pointer to be given to the call back function.
+ * @return true on success, or false on failure.
+ * @note The operation of the postprocessor is performed atomically and other threads accessing
+ * the same record are blocked.  To avoid deadlock, any explicit database operation must not
+ * be performed in this function.
+ */
+int32_t kcidxsync(KCIDX* idx, int32_t hard, KCFILEPROC proc, void* opq);
+
+
+/**
+ * Remove all records.
+ * @param idx a database object.
+ * @return true on success, or false on failure.
+ */
+int32_t kcidxclear(KCIDX* idx);
+
+
+/**
+ * Get the number of records.
+ * @param idx a database object.
+ * @return the number of records, or -1 on failure.
+ */
+int64_t kcidxcount(KCIDX* idx);
+
+
+/**
+ * Get the size of the database file.
+ * @param idx a database object.
+ * @return the size of the database file in bytes, or -1 on failure.
+ */
+int64_t kcidxsize(KCIDX* idx);
+
+
+/**
+ * Get the path of the database file.
+ * @param idx a database object.
+ * @return the path of the database file, or an empty string on failure.
+ * @note The region of the return value should be released with the kcfree function when it is
+ * no longer in use.
+ */
+char* kcidxpath(KCIDX* idx);
+
+
+/**
+ * Get the miscellaneous status information.
+ * @param idx a database object.
+ * @return the result string of tab saparated values, or NULL on failure.  Each line consists of
+ * the attribute name and its value separated by a tab character.
+ * @note The region of the return value should be released with the kcfree function when it is
+ * no longer in use.
+ */
+char* kcidxstatus(KCIDX* idx);
+
+
+/**
+ * Reveal the inner database object.
+ * @return the inner database object, or NULL on failure.
+ */
+KCDB* kcidxrevealinnerdb(KCIDX* idx);
+
+
+/**
  * C wrapper of memory-saving string hash map.
  */
-typedef union {
+typedef struct {
   void* map;                             /**< dummy member */
 } KCMAP;
 
@@ -956,7 +1165,7 @@ typedef union {
 /**
  * C wrapper of iterator of memory-saving string hash map.
  */
-typedef union {
+typedef struct {
   void* iter;                            /**< dummy member */
 } KCMAPITER;
 
@@ -964,7 +1173,7 @@ typedef union {
 /**
  * C wrapper of sorter of memory-saving string hash map.
  */
-typedef union {
+typedef struct {
   void* iter;                            /**< dummy member */
 } KCMAPSORT;
 
@@ -1202,7 +1411,7 @@ void kcmapsortstep(KCMAPSORT* sort);
 /**
  * C wrapper of memory-saving string hash map.
  */
-typedef union {
+typedef struct {
   void* list;                            /**< dummy member */
 } KCLIST;
 

@@ -1,3 +1,9 @@
+2011-03-22  FAL Labs  <info@fallabs.com>
+
+	* kclangc.h (kcidxnew, kcidxdel, kcidxopen, kcidxclose): new functions.
+
+	- Release: 1.2.51
+
 2011-03-08  FAL Labs  <info@fallabs.com>
 
 	* kcplantdb.h (PlantDB::defrag): dirty buffer clean-up was added.
