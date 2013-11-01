@@ -1,7 +1,7 @@
 # downloads latest tarball, unpacks it, then commits
 # changes to ../kyotocabinet dir
 
-for i in {30..30}; do
+for i in {31..31}; do
 
 VERSION="1.2.${i}"
 #VERSION="1.2.16"
@@ -40,6 +40,6 @@ git add -u
 git add -A *
 git commit -m "Merged from upstream v${VERSION}"
 git tag upstream-version-${VERSION}
-git push -u --tags origin master
+#git push -u --tags origin master
 
 done
