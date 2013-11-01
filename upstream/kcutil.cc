@@ -36,7 +36,7 @@ const int32_t FMTVER = _KC_FMTVER;
 
 
 /** The system name. */
-const char* const SYSNAME = _KC_SYSNAME;
+const char* const OSNAME = _KC_OSNAME;
 
 
 /** The flag for big endian environments. */
@@ -58,9 +58,9 @@ static int32_t win_getpagesize() {
   ::GetSystemInfo(&ibuf);
   return ibuf.dwPageSize;
 }
-const int32_t PAGESIZE = win_getpagesize();
+const int32_t PAGESIZ = win_getpagesize();
 #else
-const int32_t PAGESIZE = sysconf(_SC_PAGESIZE);
+const int32_t PAGESIZ = sysconf(_SC_PAGESIZE);
 #endif
 
 

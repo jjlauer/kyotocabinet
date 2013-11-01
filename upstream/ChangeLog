@@ -1,3 +1,9 @@
+2011-04-10  FAL Labs  <info@fallabs.com>
+
+	* kcutil.h (OSNAME, PAGESIZ): renamed for portability to Solaris.
+
+	- Release: 1.2.52
+
 2011-03-22  FAL Labs  <info@fallabs.com>
 
 	* kclangc.h (kcidxnew, kcidxdel, kcidxopen, kcidxclose): new functions.

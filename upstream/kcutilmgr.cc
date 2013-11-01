@@ -745,10 +745,10 @@ static int32_t procconf(int32_t mode) {
       oprintf("LIBVER: %d\n", kc::LIBVER);
       oprintf("LIBREV: %d\n", kc::LIBREV);
       oprintf("FMTVER: %d\n", kc::FMTVER);
-      oprintf("SYSNAME: %s\n", kc::SYSNAME);
+      oprintf("OSNAME: %s\n", kc::OSNAME);
       oprintf("BIGEND: %d\n", kc::BIGEND);
       oprintf("CLOCKTICK: %d\n", kc::CLOCKTICK);
-      oprintf("PAGESIZE: %d\n", kc::PAGESIZE);
+      oprintf("PAGESIZ: %d\n", kc::PAGESIZ);
       oprintf("FEATURES: %s\n", kc::FEATURES);
       oprintf("TYPES: void*=%d short=%d int=%d long=%d long_long=%d size_t=%d"
               " float=%d double=%d long_double=%d\n",

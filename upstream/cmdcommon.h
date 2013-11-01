@@ -177,7 +177,7 @@ inline void eprintf(const char* format, ...) {
 // print the versin information
 inline void printversion() {
   oprintf("Kyoto Cabinet %s (%d.%d:%d) on %s\n",
-          kc::VERSION, kc::LIBVER, kc::LIBREV, kc::FMTVER, kc::SYSNAME);
+          kc::VERSION, kc::LIBVER, kc::LIBREV, kc::FMTVER, kc::OSNAME);
 }
 
 

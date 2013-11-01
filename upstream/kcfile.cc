@@ -363,8 +363,8 @@ bool File::open(const std::string& path, uint32_t mode, int64_t msiz) {
   }
   int64_t lsiz = sbuf.QuadPart;
   int64_t psiz = lsiz;
-  int64_t diff = msiz % PAGESIZE;
-  if (diff > 0) msiz += PAGESIZE - diff;
+  int64_t diff = msiz % PAGESIZ;
+  if (diff > 0) msiz += PAGESIZ - diff;
   ::DWORD mprot = PAGE_READONLY;
   ::DWORD vmode = FILE_MAP_READ;
   if (mode & OWRITER) {
@@ -489,8 +489,8 @@ bool File::open(const std::string& path, uint32_t mode, int64_t msiz) {
   }
   int64_t lsiz = sbuf.st_size;
   int64_t psiz = lsiz;
-  int64_t diff = msiz % PAGESIZE;
-  if (diff > 0) msiz += PAGESIZE - diff;
+  int64_t diff = msiz % PAGESIZ;
+  if (diff > 0) msiz += PAGESIZ - diff;
   int32_t mprot = PROT_READ;
   if (mode & OWRITER) {
     mprot |= PROT_WRITE;
@@ -660,8 +660,8 @@ bool File::write(int64_t off, const void* buf, size_t size) {
   if (end <= core->msiz) {
     if (end > core->psiz) {
       int64_t psiz = end + core->psiz / 2;
-      int64_t diff = psiz % PAGESIZE;
-      if (diff > 0) psiz += PAGESIZE - diff;
+      int64_t diff = psiz % PAGESIZ;
+      if (diff > 0) psiz += PAGESIZ - diff;
       if (psiz > core->msiz) psiz = core->msiz;
       if (win_ftruncate(core->fh, psiz) != 0) {
         seterrmsg(core, "win_ftruncate failed");
@@ -715,8 +715,8 @@ bool File::write(int64_t off, const void* buf, size_t size) {
   if (end <= core->msiz) {
     if (end > core->psiz) {
       int64_t psiz = end + core->psiz / 2;
-      int64_t diff = psiz % PAGESIZE;
-      if (diff > 0) psiz += PAGESIZE - diff;
+      int64_t diff = psiz % PAGESIZ;
+      if (diff > 0) psiz += PAGESIZ - diff;
       if (psiz > core->msiz) psiz = core->msiz;
       if (::ftruncate(core->fd, psiz) != 0) {
         seterrmsg(core, "ftruncate failed");
@@ -828,8 +828,8 @@ bool File::append(const void* buf, size_t size) {
   if (end <= core->msiz) {
     if (end > core->psiz) {
       int64_t psiz = end + core->psiz / 2;
-      int64_t diff = psiz % PAGESIZE;
-      if (diff > 0) psiz += PAGESIZE - diff;
+      int64_t diff = psiz % PAGESIZ;
+      if (diff > 0) psiz += PAGESIZ - diff;
       if (psiz > core->msiz) psiz = core->msiz;
       if (win_ftruncate(core->fh, psiz) != 0) {
         seterrmsg(core, "win_ftruncate failed");
@@ -888,8 +888,8 @@ bool File::append(const void* buf, size_t size) {
   if (end <= core->msiz) {
     if (end > core->psiz) {
       int64_t psiz = end + core->psiz / 2;
-      int64_t diff = psiz % PAGESIZE;
-      if (diff > 0) psiz += PAGESIZE - diff;
+      int64_t diff = psiz % PAGESIZ;
+      if (diff > 0) psiz += PAGESIZ - diff;
       if (psiz > core->msiz) psiz = core->msiz;
       if (::ftruncate(core->fd, psiz) != 0) {
         seterrmsg(core, "ftruncate failed");

@@ -106,7 +106,7 @@ extern const int32_t FMTVER;
 
 
 /** The system name. */
-extern const char* const SYSNAME;
+extern const char* const OSNAME;
 
 
 /** The flag for big endian environments. */
@@ -118,7 +118,7 @@ extern const int32_t CLOCKTICK;
 
 
 /** The size of a page. */
-extern const int32_t PAGESIZE;
+extern const int32_t PAGESIZ;
 
 
 /** The extra feature list. */
@@ -2294,8 +2294,8 @@ inline bool _dummytest() {
   oss << INT8MIN << INT16MIN << INT32MIN << INT64MIN;
   oss << UINT8MAX << UINT16MAX << UINT32MAX << UINT64MAX;
   oss << SIZEMAX << FLTMAX << DBLMAX;
-  oss << VERSION << LIBVER << LIBREV << FMTVER << SYSNAME;
-  oss << BIGEND << CLOCKTICK << PAGESIZE << FEATURES;
+  oss << VERSION << LIBVER << LIBREV << FMTVER << OSNAME;
+  oss << BIGEND << CLOCKTICK << PAGESIZ << FEATURES;
   oss << NUMBUFSIZ << MEMMAXSIZ;
   return oss.tellp() > 0;
 }

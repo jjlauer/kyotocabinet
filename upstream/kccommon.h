@@ -103,10 +103,10 @@ using tr1::unordered_set;
 #undef VERSION
 #undef LIBVER
 #undef LIBREV
-#undef SYSNAME
+#undef OSNAME
 #undef BIGEND
 #undef CLOCKTICK
-#undef PAGESIZE
+#undef PAGESIZ
 #undef FEATURES
 #undef NUMBUFSIZ
 #undef MEMMAXSIZ
