@@ -156,11 +156,11 @@ class File {
     _assert_(off >= 0 && buf);
     char* tbuf = new char[size];
     if (!read(off, tbuf, size)) {
-      delete tbuf;
+      delete[] tbuf;
       return false;
     }
     buf->append(std::string(tbuf, size));
-    delete tbuf;
+    delete[] tbuf;
     return true;
   }
   /**
@@ -179,11 +179,11 @@ class File {
     _assert_(off >= 0 && buf);
     char* tbuf = new char[size];
     if (!read_fast(off, tbuf, size)) {
-      delete tbuf;
+      delete[] tbuf;
       return false;
     }
     buf->append(std::string(tbuf, size));
-    delete tbuf;
+    delete[] tbuf;
     return true;
   }
   /**
