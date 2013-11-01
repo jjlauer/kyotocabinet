@@ -1308,11 +1308,11 @@ class PolyDB : public BasicDB {
                   new uint32_t[ksiz] : kstack;
               size_t knum;
               strutftoucs(kbuf, ksiz, kary, &knum);
-              kdist = std::labs((long)onum - (long)knum) > range ?
+              kdist = std::labs((long)onum - (long)knum) > (long)range ?
                   UINT32MAX : strucsdist(oary, onum, kary, knum);
               if (kary != kstack) delete[] kary;
             } else {
-              kdist = std::labs((long)origin.size() - (long)ksiz) > range ?
+              kdist = std::labs((long)origin.size() - (long)ksiz) > (long)range ?
                   UINT32MAX : memdist(origin.data(), origin.size(), kbuf, ksiz);
             }
             if (kdist <= range) {

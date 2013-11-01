@@ -1,3 +1,9 @@
+2012-03-28  FAL Labs  <info@fallabs.com>
+
+	* kcpolydb.h (PolyDB::match_similar): supressed warnings on signedness.
+
+	- Release: 1.2.75
+
 2012-03-15  FAL Labs  <info@fallabs.com>
 
 	* kcpolydb.h (PolyDB::SimilarKey): the type of a member was modified for c++0x mode.
