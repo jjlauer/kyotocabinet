@@ -1,4 +1,4 @@
-.TH "KCPOLYMGR" 1 "2011-07-20" "Man Page" "Kyoto Cabinet"
+.TH "KCPOLYMGR" 1 "2012-03-06" "Man Page" "Kyoto Cabinet"
 
 .SH NAME
 kcpolymgr \- command line interface to manage the polymorphic database
@@ -34,7 +34,7 @@ Removes a record.
 Prints the value of a record.
 .RE
 .br
-\fBkcpolymgr list \fR[\fB\-onl\fR|\fB\-otl\fR|\fB\-onr\fR]\fB \fR[\fB\-des\fR]\fB \fR[\fB\-max \fInum\fB\fR]\fB \fR[\fB\-rm\fR]\fB \fR[\fB\-sx\fR]\fB \fR[\fB\-pv\fR]\fB \fR[\fB\-px\fR]\fB \fIpath\fB \fR[\fB\fIkey\fB\fR]\fB\fR
+\fBkcpolymgr list \fR[\fB\-onl\fR|\fB\-otl\fR|\fB\-onr\fR]\fB \fR[\fB\-mp\fR|\fB\-mr\fR|\fB\-ms\fR]\fB \fR[\fB\-des\fR]\fB \fR[\fB\-max \fInum\fB\fR]\fB \fR[\fB\-rm\fR]\fB \fR[\fB\-sx\fR]\fB \fR[\fB\-pv\fR]\fB \fR[\fB\-px\fR]\fB \fIpath\fB \fR[\fB\fIkey\fB\fR]\fB\fR
 .RS
 Prints keys of all records, separated by line feeds.
 .RE
@@ -119,7 +119,13 @@ Options feature the following.
 .br
 \fB\-px\fR : the output data is converted into a hexadecimal data string.
 .br
-\fB\-pz\fR : does not append line feed at the end of the output.
+\fB\-pz\fR : performs not append line feed at the end of the output.
+.br
+\fB\-mp\fR : performs prefix matching instead of usual scan.
+.br
+\fB\-mr\fR : performs regular expression matching instead of usual scan.
+.br
+\fB\-ms\fR : performs similar matching instead of usual scan.
 .br
 \fB\-des\fR : visits records in descending order.
 .br

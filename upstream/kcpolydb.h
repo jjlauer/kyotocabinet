@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * Polymorphic database
- *                                                               Copyright (C) 2009-2011 FAL Labs
+ *                                                               Copyright (C) 2009-2012 FAL Labs
  * This file is part of Kyoto Cabinet.
  * This program is free software: you can redistribute it and/or modify it under the terms of
  * the GNU General Public License as published by the Free Software Foundation, either version
@@ -52,6 +52,7 @@ class PolyDB : public BasicDB {
  private:
   class StreamLogger;
   class StreamMetaTrigger;
+  struct SimilarKey;
   struct MergeLine;
  public:
   /**
@@ -1261,6 +1262,107 @@ class PolyDB : public BasicDB {
     return err ? -1 : strvec->size();
   }
   /**
+   * Get keys similar to a string in terms of the levenshtein distance.
+   * @param origin the origin string.
+   * @param range the maximum distance of keys to adopt.
+   * @param utf flag to treat keys as UTF-8 strings.
+   * @param strvec a string vector to contain the result.
+   * @param max the maximum number to retrieve.  If it is negative, no limit is specified.
+   * @param checker a progress checker object.  If it is NULL, no checking is performed.
+   * @return the number of retrieved keys or -1 on failure.
+   */
+  int64_t match_similar(const std::string& origin, size_t range, bool utf,
+                        std::vector<std::string>* strvec,
+                        int64_t max = -1, ProgressChecker* checker = NULL) {
+    _assert_(strvec);
+    if (max < 0) max = INT64MAX;
+    bool err = false;
+    int64_t allcnt = count();
+    if (checker && !checker->check("match_similar", "beginning", 0, allcnt)) {
+      set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+      err = true;
+    }
+    strvec->clear();
+    uint32_t ostack[128];
+    uint32_t* oary = NULL;
+    size_t onum = 0;
+    if (utf) {
+      const char* ostr = origin.c_str();
+      onum = strutflen(ostr);
+      oary = onum > sizeof(ostack) / sizeof(*ostack) ? new uint32_t[onum] : ostack;
+      strutftoucs(ostr, oary, &onum);
+    }
+    Cursor* cur = cursor();
+    int64_t curcnt = 0;
+    std::priority_queue<SimilarKey> queue;
+    if (cur->jump()) {
+      if (max > 0) {
+        while (true) {
+          size_t ksiz;
+          char* kbuf = cur->get_key(&ksiz, true);
+          if (kbuf) {
+            size_t kdist;
+            if (oary) {
+              uint32_t kstack[128];
+              uint32_t* kary = ksiz > sizeof(kstack) / sizeof(*kstack) ?
+                  new uint32_t[ksiz] : kstack;
+              size_t knum;
+              strutftoucs(kbuf, ksiz, kary, &knum);
+              kdist = std::labs((long)onum - (long)knum) > range ?
+                  UINT32MAX : strucsdist(oary, onum, kary, knum);
+              if (kary != kstack) delete[] kary;
+            } else {
+              kdist = std::labs((long)origin.size() - (long)ksiz) > range ?
+                  UINT32MAX : memdist(origin.data(), origin.size(), kbuf, ksiz);
+            }
+            if (kdist <= range) {
+              std::string key(kbuf, ksiz);
+              if ((int64_t)queue.size() < max) {
+                SimilarKey skey = { kdist, key, curcnt };
+                queue.push(skey);
+              } else {
+                const SimilarKey& top = queue.top();
+                if (!top.less(kdist, key, curcnt)) {
+                  queue.pop();
+                  SimilarKey skey = { kdist, key, curcnt };
+                  queue.push(skey);
+                }
+              }
+            }
+            delete[] kbuf;
+          } else {
+            if (cur->error() != Error::NOREC) err = true;
+            break;
+          }
+          curcnt++;
+          if (checker && !checker->check("match_similar", "processing", curcnt, allcnt)) {
+            set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+            err = true;
+          }
+        }
+        while (!queue.empty()) {
+          const SimilarKey& top = queue.top();
+          strvec->push_back(top.key);
+          queue.pop();
+        }
+        size_t end = strvec->size() - 1;
+        size_t mid = strvec->size() / 2;
+        for (size_t i = 0; i < mid; i++) {
+          (*strvec)[i].swap((*strvec)[end-i]);
+        }
+      }
+    } else if (cur->error() != Error::NOREC) {
+      err = true;
+    }
+    if (checker && !checker->check("match_similar", "ending", strvec->size(), allcnt)) {
+      set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
+      err = true;
+    }
+    delete cur;
+    if (oary && oary != ostack) delete[] oary;
+    return err ? -1 : strvec->size();
+  }
+  /**
    * Merge records from other databases.
    * @param srcary an array of the source detabase objects.
    * @param srcnum the number of the elements of the source array.
@@ -1484,6 +1586,24 @@ class PolyDB : public BasicDB {
    private:
     std::ostream* strm_;                 ///< output stream
     std::string prefix_;                 ///< prefix of each message
+  };
+  /**
+   * Key for similarity search.
+   */
+  struct SimilarKey {
+    size_t dist;
+    std::string key;
+    uint32_t order;
+    bool operator <(const SimilarKey& right) const {
+      if (dist != right.dist) return dist < right.dist;
+      if (key != right.key) return key < right.key;
+      return order < right.order;
+    }
+    bool less(size_t rdist, const std::string& rkey, uint32_t rorder) const {
+      if (dist != rdist) return dist < rdist;
+      if (key != rkey) return key < rkey;
+      return order < rorder;
+    }
   };
   /**
    * Front line of a merging list.

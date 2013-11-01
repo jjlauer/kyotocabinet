@@ -1,3 +1,15 @@
+2012-03-06  FAL Labs  <info@fallabs.com>
+
+	* kcutil.h (memdist, strutfdist, strucsdist): new functions.
+
+	* kcpolydb.h (PolyDB::match_similar): new funcion.
+
+	* kclangc.h (kclevdist, kcdbmatchsimilar): new functions.
+
+	* kcfile.cc (File::open): LOCKFILE_FAIL_IMMEDIATELY support was added for Win32.
+
+	- Release: 1.2.73
+
 2011-12-15  FAL Labs  <info@fallabs.com>
 
 	* kcfile.h (File::read, File::read_rast): a bug of invalid memory deletion was fixed.

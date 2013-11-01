@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The command line utility of the polymorphic database
- *                                                               Copyright (C) 2009-2011 FAL Labs
+ *                                                               Copyright (C) 2009-2012 FAL Labs
  * This file is part of Kyoto Cabinet.
  * This program is free software: you can redistribute it and/or modify it under the terms of
  * the GNU General Public License as published by the Free Software Foundation, either version
@@ -49,7 +49,7 @@ static int32_t procremove(const char* path, const char* kbuf, size_t ksiz, int32
 static int32_t procget(const char* path, const char* kbuf, size_t ksiz,
                        int32_t oflags, bool rm, bool px, bool pz);
 static int32_t proclist(const char* path, const char*kbuf, size_t ksiz, int32_t oflags,
-                        bool des, int64_t max, bool rm, bool pv, bool px);
+                        int32_t mode, bool des, int64_t max, bool rm, bool pv, bool px);
 static int32_t procclear(const char* path, int32_t oflags);
 static int32_t procimport(const char* path, const char* file, int32_t oflags, bool sx);
 static int32_t proccopy(const char* path, const char* file, int32_t oflags);
@@ -125,8 +125,8 @@ static void usage() {
           g_progname);
   eprintf("  %s remove [-onl|-otl|-onr] [-sx] path key\n", g_progname);
   eprintf("  %s get [-onl|-otl|-onr] [-rm] [-sx] [-px] [-pz] path key\n", g_progname);
-  eprintf("  %s list [-onl|-otl|-onr] [-des] [-max num] [-rm] [-sx] [-pv] [-px] path [key]\n",
-          g_progname);
+  eprintf("  %s list [-onl|-otl|-onr] [-mp|-mr|-ms] [-des] [-max num] [-rm] [-sx] [-pv] [-px]"
+          " path [key]\n", g_progname);
   eprintf("  %s clear [-onl|-otl|-onr] path\n", g_progname);
   eprintf("  %s import [-onl|-otl|-onr] [-sx] path [file]\n", g_progname);
   eprintf("  %s copy [-onl|-otl|-onr] path file\n", g_progname);
@@ -394,6 +394,7 @@ static int32_t runlist(int argc, char** argv) {
   const char* path = NULL;
   const char* kstr = NULL;
   int32_t oflags = 0;
+  int32_t mode = 0;
   bool des = false;
   int64_t max = -1;
   bool rm = false;
@@ -410,6 +411,12 @@ static int32_t runlist(int argc, char** argv) {
         oflags |= kc::PolyDB::OTRYLOCK;
       } else if (!std::strcmp(argv[i], "-onr")) {
         oflags |= kc::PolyDB::ONOREPAIR;
+      } else if (!std::strcmp(argv[i], "-mp")) {
+        mode = 'p';
+      } else if (!std::strcmp(argv[i], "-mr")) {
+        mode = 'r';
+      } else if (!std::strcmp(argv[i], "-ms")) {
+        mode = 's';
       } else if (!std::strcmp(argv[i], "-des")) {
         des = true;
       } else if (!std::strcmp(argv[i], "-max")) {
@@ -449,7 +456,7 @@ static int32_t runlist(int argc, char** argv) {
       kbuf[ksiz] = '\0';
     }
   }
-  int32_t rv = proclist(path, kbuf, ksiz, oflags, des, max, rm, pv, px);
+  int32_t rv = proclist(path, kbuf, ksiz, oflags, mode, des, max, rm, pv, px);
   delete[] kbuf;
   return rv;
 }
@@ -1027,7 +1034,7 @@ static int32_t procget(const char* path, const char* kbuf, size_t ksiz,
 
 // perform list command
 static int32_t proclist(const char* path, const char*kbuf, size_t ksiz, int32_t oflags,
-                        bool des, int64_t max, bool rm, bool pv, bool px) {
+                        int32_t mode, bool des, int64_t max, bool rm, bool pv, bool px) {
   kc::PolyDB db;
   db.tune_logger(stdlogger(g_progname, &std::cerr));
   uint32_t omode = rm ? kc::PolyDB::OWRITER : kc::PolyDB::OREADER;
@@ -1054,7 +1061,75 @@ static int32_t proclist(const char* path, const char*kbuf, size_t ksiz, int32_t 
     bool pv_;
     bool px_;
   } visitor(rm, pv, px);
-  if (kbuf || des || max >= 0) {
+  class Printer {
+   public:
+    static bool print(kc::BasicDB* db, const std::vector<std::string>& keys,
+                      bool des, bool rm, bool pv, bool px) {
+      bool err = false;
+      if (des) {
+        for (int64_t i = (int64_t)keys.size() - 1; i >= 0; i--) {
+          if (!proc_one(db, keys[i], rm, pv, px)) err = true;
+        }
+      } else {
+        std::vector<std::string>::const_iterator it = keys.begin();
+        std::vector<std::string>::const_iterator itend = keys.end();
+        while (it != itend) {
+          if (!proc_one(db, *it, rm, pv, px)) err = true;
+          ++it;
+        }
+      }
+      return !err;
+    }
+   private:
+    static bool proc_one(kc::BasicDB* db, const std::string& key, bool rm, bool pv, bool px) {
+      bool err = false;
+      printdata(key.data(), key.size(), px);
+      if (pv) {
+        size_t vsiz;
+        char* vbuf = db->get(key.data(), key.size(), &vsiz);
+        if (vbuf) {
+          oprintf("\t");
+          printdata(vbuf, vsiz, px);
+          delete[] vbuf;
+        } else {
+          dberrprint(db, "DB::get failed");
+          err = true;
+        }
+      }
+      oprintf("\n");
+      if (rm && !db->remove(key.data(), key.size())) {
+        dberrprint(db, "DB::remove failed");
+        err = true;
+      }
+      return !err;
+    }
+  };
+  if (mode == 'p') {
+    std::vector<std::string> keys;
+    if (db.match_prefix(std::string(kbuf, ksiz), &keys, max) >= 0) {
+      if (!Printer::print(&db, keys, des, rm, pv, px)) err = true;
+    } else {
+      dberrprint(&db, "DB::match_prefix failed");
+      err = true;
+    }
+  } else if (mode == 'r') {
+    std::vector<std::string> keys;
+    if (db.match_regex(std::string(kbuf, ksiz), &keys, max) >= 0) {
+      if (!Printer::print(&db, keys, des, rm, pv, px)) err = true;
+    } else {
+      dberrprint(&db, "DB::match_regex failed");
+      err = true;
+    }
+  } else if (mode == 's') {
+    size_t range = ksiz / 3 + 1;
+    std::vector<std::string> keys;
+    if (db.match_similar(std::string(kbuf, ksiz), range, false, &keys, max) >= 0) {
+      if (!Printer::print(&db, keys, des, rm, pv, px)) err = true;
+    } else {
+      dberrprint(&db, "DB::match_similar failed");
+      err = true;
+    }
+  } else if (kbuf || des || max >= 0) {
     if (max < 0) max = kc::INT64MAX;
     kc::PolyDB::Cursor cur(&db);
     if (des) {

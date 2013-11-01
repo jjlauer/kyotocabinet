@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * C language binding
- *                                                               Copyright (C) 2009-2011 FAL Labs
+ *                                                               Copyright (C) 2009-2012 FAL Labs
  * This file is part of Kyoto Cabinet.
  * This program is free software: you can redistribute it and/or modify it under the terms of
  * the GNU General Public License as published by the Free Software Foundation, either version
@@ -104,6 +104,31 @@ uint64_t kchashmurmur(const void* buf, size_t size) {
 uint64_t kchashfnv(const void* buf, size_t size) {
   _assert_(buf && size <= MEMMAXSIZ);
   return kyotocabinet::hashfnv(buf, size);
+}
+
+
+/**
+ * Calculate the levenshtein distance of two regions.
+ */
+size_t kclevdist(const void* abuf, size_t asiz, const void* bbuf, size_t bsiz, int32_t utf) {
+  _assert_(abuf && asiz <= MEMMAXSIZ && bbuf && bsiz <= MEMMAXSIZ);
+  size_t dist;
+  if (utf) {
+    uint32_t astack[128];
+    uint32_t* aary = asiz > sizeof(astack) / sizeof(*astack) ? new uint32_t[asiz] : astack;
+    size_t anum;
+    strutftoucs((const char*)abuf, asiz, aary, &anum);
+    uint32_t bstack[128];
+    uint32_t* bary = bsiz > sizeof(bstack) / sizeof(*bstack) ? new uint32_t[bsiz] : bstack;
+    size_t bnum;
+    strutftoucs((const char*)bbuf, bsiz, bary, &bnum);
+    dist = strucsdist(aary, anum, bary, bnum);
+    if (bary != bstack) delete[] bary;
+    if (aary != astack) delete[] aary;
+  } else {
+    dist = memdist(abuf, asiz, bbuf, bsiz);
+  }
+  return dist;
 }
 
 
@@ -681,7 +706,7 @@ int64_t kcdbmatchprefix(KCDB* db, const char* prefix, char** strary, size_t max)
   _assert_(db && prefix && strary && max <= MEMMAXSIZ);
   PolyDB* pdb = (PolyDB*)db;
   std::vector<std::string> strvec;
-  if (pdb->match_prefix(std::string(prefix), &strvec, max) == -1) return -1;
+  if (pdb->match_prefix(prefix, &strvec, max) == -1) return -1;
   int64_t cnt = 0;
   std::vector<std::string>::iterator it = strvec.begin();
   std::vector<std::string>::iterator itend = strvec.end();
@@ -704,7 +729,31 @@ int64_t kcdbmatchregex(KCDB* db, const char* regex, char** strary, size_t max) {
   _assert_(db && regex && strary && max <= MEMMAXSIZ);
   PolyDB* pdb = (PolyDB*)db;
   std::vector<std::string> strvec;
-  if (pdb->match_regex(std::string(regex), &strvec, max) == -1) return -1;
+  if (pdb->match_regex(regex, &strvec, max) == -1) return -1;
+  int64_t cnt = 0;
+  std::vector<std::string>::iterator it = strvec.begin();
+  std::vector<std::string>::iterator itend = strvec.end();
+  while (it != itend) {
+    size_t ksiz = it->size();
+    char* kbuf = new char[ksiz+1];
+    std::memcpy(kbuf, it->data(), ksiz);
+    kbuf[ksiz] = '\0';
+    strary[cnt++] = kbuf;
+    ++it;
+  }
+  return cnt;
+}
+
+
+/**
+ * Get keys similar to a string in terms of the levenshtein distance.
+ */
+int64_t kcdbmatchsimilar(KCDB* db, const char* origin, uint32_t range, int32_t utf,
+                         char** strary, size_t max) {
+  _assert_(db && origin && strary && max <= MEMMAXSIZ);
+  PolyDB* pdb = (PolyDB*)db;
+  std::vector<std::string> strvec;
+  if (pdb->match_similar(origin, range, utf, &strvec, max) == -1) return -1;
   int64_t cnt = 0;
   std::vector<std::string>::iterator it = strvec.begin();
   std::vector<std::string>::iterator itend = strvec.end();

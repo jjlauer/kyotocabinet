@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The test cases of the utility functions
- *                                                               Copyright (C) 2009-2011 FAL Labs
+ *                                                               Copyright (C) 2009-2012 FAL Labs
  * This file is part of Kyoto Cabinet.
  * This program is free software: you can redistribute it and/or modify it under the terms of
  * the GNU General Public License as published by the Free Software Foundation, either version
@@ -2577,7 +2577,11 @@ static int32_t procmisc(int64_t rnum) {
       }
       uint32_t* cucs = new uint32_t[utf.size()+1];
       size_t cucsnum;
-      kc::strutftoucs(utf.c_str(), cucs, &cucsnum);
+      if (myrand(2) == 0) {
+        kc::strutftoucs(utf.c_str(), cucs, &cucsnum);
+      } else {
+        kc::strutftoucs(utf.data(), utf.size(), cucs, &cucsnum);
+      }
       if (cucsnum == oucs.size()) {
         char* cutf = new char[cucsnum*6+1];
         kc::strucstoutf(cucs, cucsnum, cutf);
@@ -2672,6 +2676,10 @@ static int32_t procmisc(int64_t rnum) {
     }
     if (!kc::memimem(obuf, osiz, ubuf, usiz)) {
       errprint(__LINE__, "memimem");
+      err = true;
+    }
+    if (kc::memdist(obuf, osiz, ubuf, usiz)) {
+      errprint(__LINE__, "memdist");
       err = true;
     }
     delete[] obuf;

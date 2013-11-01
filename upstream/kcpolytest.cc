@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * The test cases of the polymorphic database
- *                                                               Copyright (C) 2009-2011 FAL Labs
+ *                                                               Copyright (C) 2009-2012 FAL Labs
  * This file is part of Kyoto Cabinet.
  * This program is free software: you can redistribute it and/or modify it under the terms of
  * the GNU General Public License as published by the Free Software Foundation, either version
@@ -1956,6 +1956,14 @@ static int32_t procwicked(const char* path, int64_t rnum, int32_t thnum, int32_t
                   if (db_->match_regex(regex, &keys, myrand(10)) == -1 &&
                       db_->error() != kc::BasicDB::Error::LOGIC) {
                     dberrprint(db_, __LINE__, "DB::match_regex");
+                    err_ = true;
+                  }
+                }
+                if (myrand(rnum_ / 50 + 1) == 0) {
+                  std::vector<std::string> keys;
+                  std::string origin(kbuf, ksiz > 0 ? ksiz - 1 : 0);
+                  if (db_->match_similar(origin, 3, myrand(2) == 0, &keys, myrand(10)) == -1) {
+                    dberrprint(db_, __LINE__, "DB::match_similar");
                     err_ = true;
                   }
                 }

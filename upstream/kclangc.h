@@ -1,6 +1,6 @@
 /*************************************************************************************************
  * C language binding
- *                                                               Copyright (C) 2009-2011 FAL Labs
+ *                                                               Copyright (C) 2009-2012 FAL Labs
  * This file is part of Kyoto Cabinet.
  * This program is free software: you can redistribute it and/or modify it under the terms of
  * the GNU General Public License as published by the Free Software Foundation, either version
@@ -240,6 +240,18 @@ uint64_t kchashmurmur(const void* buf, size_t size);
  * @return the hash value.
  */
 uint64_t kchashfnv(const void* buf, size_t size);
+
+
+/**
+ * Calculate the levenshtein distance of two regions.
+ * @param abuf the pointer to the region of one buffer.
+ * @param asiz the size of the region of one buffer.
+ * @param bbuf the pointer to the region of the other buffer.
+ * @param bsiz the size of the region of the other buffer.
+ * @param utf flag to treat keys as UTF-8 strings.
+ * @return the levenshtein distance of two regions.
+ */
+size_t kclevdist(const void* abuf, size_t asiz, const void* bbuf, size_t bsiz, int32_t utf);
 
 
 /**
@@ -789,6 +801,22 @@ int64_t kcdbmatchprefix(KCDB* db, const char* prefix, char** strary, size_t max)
  * when it is no longer in use.
  */
 int64_t kcdbmatchregex(KCDB* db, const char* regex, char** strary, size_t max);
+
+
+/**
+ * Get keys similar to a string in terms of the levenshtein distance.
+ * @param db a database object.
+ * @param origin the origin string.
+ * @param range the maximum distance of keys to adopt.
+ * @param utf flag to treat keys as UTF-8 strings.
+ * @param strary an array to contain the result.  Its size must be sufficient.
+ * @param max the maximum number to retrieve.
+ * @return the number of retrieved keys or -1 on failure.
+ * @note The region of each element of the result should be released with the kcfree function
+ * when it is no longer in use.
+ */
+int64_t kcdbmatchsimilar(KCDB* db, const char* origin, uint32_t range, int32_t utf,
+                         char** strary, size_t max);
 
 
 /**
