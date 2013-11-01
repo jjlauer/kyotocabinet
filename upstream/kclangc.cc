@@ -387,10 +387,10 @@ double kcdbincrdouble(KCDB* db, const char* kbuf, size_t ksiz, double num, doubl
  * Perform compare-and-swap.
  */
 int32_t kcdbcas(KCDB* db, const char* kbuf, size_t ksiz,
-                const char* nvbuf, size_t nvsiz, const char* ovbuf, size_t ovsiz) {
+                const char* ovbuf, size_t ovsiz, const char* nvbuf, size_t nvsiz) {
   _assert_(db && kbuf && ksiz <= MEMMAXSIZ);
   PolyDB* pdb = (PolyDB*)db;
-  return pdb->cas(kbuf, ksiz, nvbuf, nvsiz, ovbuf, ovsiz);
+  return pdb->cas(kbuf, ksiz, ovbuf, ovsiz, nvbuf, nvsiz);
 }
 
 

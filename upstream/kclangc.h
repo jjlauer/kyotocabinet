@@ -539,7 +539,7 @@ double kcdbincrdouble(KCDB* db, const char* kbuf, size_t ksiz, double num, doubl
  * @return true on success, or false on failure.
  */
 int32_t kcdbcas(KCDB* db, const char* kbuf, size_t ksiz,
-                const char* nvbuf, size_t nvsiz, const char* ovbuf, size_t ovsiz);
+                const char* ovbuf, size_t ovsiz, const char* nvbuf, size_t nvsiz);
 
 
 /**
