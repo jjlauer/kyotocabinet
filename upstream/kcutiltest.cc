@@ -1214,11 +1214,14 @@ static int32_t proccond(int64_t rnum, int32_t thnum, double iv) {
     int32_t actnum = 0;
     for (int32_t i = 0; i < thnum; i++) {
       if (threadcondvars[i].active()) actnum++;
+      bool lock = (cnt + i) % 5 == 0;
+      if (lock) mutex.lock();
       if (cnt % (thnum + 1) < 1) {
         cond.broadcast();
       } else {
         cond.signal();
       }
+      if (lock) mutex.unlock();
     }
     if (actnum < 1) break;
     cnt++;
@@ -1286,11 +1289,14 @@ static int32_t proccond(int64_t rnum, int32_t thnum, double iv) {
       if (threadcondmaps[i].active()) actnum++;
       char kbuf[RECBUFSIZ];
       size_t ksiz = std::sprintf(kbuf, "%08d", (int)i);
+      bool lock = (cnt + i) % 5 == 0;
+      if (lock) mutex.lock();
       if (cnt % (thnum + 1) < 1) {
-        cmap.broadcast_all();
+        cmap.broadcast(kbuf, ksiz);
       } else {
         cmap.signal(kbuf, ksiz);
       }
+      if (lock) mutex.unlock();
     }
     if (cnt % 1024 < 1) cmap.broadcast_all();
     if (actnum < 1) break;

@@ -1,3 +1,9 @@
+2011-06-12  FAL Labs  <info@fallabs.com>
+
+	* kcthread.cc (CondVar::wait): a bug of race condition on Win32 was fixed.
+
+	- Release: 1.2.62
+
 2011-06-09  FAL Labs  <info@fallabs.com>
 
 	* kcthread.h (CondMap): new class.

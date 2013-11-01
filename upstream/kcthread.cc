@@ -1812,7 +1812,9 @@ void CondVar::wait(Mutex* mutex) {
   _assert_(mutex);
   CondVarCore* core = (CondVarCore*)opq_;
   ::CRITICAL_SECTION* mymutex = (::CRITICAL_SECTION*)mutex->opq_;
+  ::EnterCriticalSection(&core->mutex);
   core->wait++;
+  ::LeaveCriticalSection(&core->mutex);
   ::LeaveCriticalSection(mymutex);
   while (true) {
     ::WaitForSingleObject(core->sev, INFINITE);
@@ -1849,12 +1851,17 @@ bool CondVar::wait(Mutex* mutex, double sec) {
   if (sec <= 0) return false;
   CondVarCore* core = (CondVarCore*)opq_;
   ::CRITICAL_SECTION* mymutex = (::CRITICAL_SECTION*)mutex->opq_;
+  ::EnterCriticalSection(&core->mutex);
   core->wait++;
+  ::LeaveCriticalSection(&core->mutex);
   ::LeaveCriticalSection(mymutex);
   while (true) {
     if (::WaitForSingleObject(core->sev, sec * 1000) == WAIT_TIMEOUT) {
-      ::EnterCriticalSection(mymutex);
+      ::EnterCriticalSection(&core->mutex);
       core->wait--;
+      ::SetEvent(core->fev);
+      ::LeaveCriticalSection(&core->mutex);
+      ::EnterCriticalSection(mymutex);
       return false;
     }
     ::EnterCriticalSection(&core->mutex);
@@ -1908,10 +1915,14 @@ void CondVar::signal() {
 #if defined(_SYS_MSVC_) || defined(_SYS_MINGW_)
   _assert_(true);
   CondVarCore* core = (CondVarCore*)opq_;
+  ::EnterCriticalSection(&core->mutex);
   if (core->wait > 0) {
     core->wake = 1;
     ::SetEvent(core->sev);
+    ::LeaveCriticalSection(&core->mutex);
     ::WaitForSingleObject(core->fev, INFINITE);
+  } else {
+    ::LeaveCriticalSection(&core->mutex);
   }
 #else
   _assert_(true);
@@ -1929,10 +1940,14 @@ void CondVar::broadcast() {
 #if defined(_SYS_MSVC_) || defined(_SYS_MINGW_)
   _assert_(true);
   CondVarCore* core = (CondVarCore*)opq_;
+  ::EnterCriticalSection(&core->mutex);
   if (core->wait > 0) {
     core->wake = core->wait;
     ::SetEvent(core->sev);
+    ::LeaveCriticalSection(&core->mutex);
     ::WaitForSingleObject(core->fev, INFINITE);
+  } else {
+    ::LeaveCriticalSection(&core->mutex);
   }
 #else
   _assert_(true);
