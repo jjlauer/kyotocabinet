@@ -1101,7 +1101,7 @@ class IndexDB {
     }
     bool err = false;
     if (!clean_dbs(kbuf, ksiz)) err = true;
-    cache_->append(kbuf, ksiz, vbuf, vsiz);
+    cache_->set(kbuf, ksiz, vbuf, vsiz);
     csiz_ += ksiz + vsiz;
     if (csiz_ > clim_ && !flush_cache()) err = false;
     return !err;
@@ -1140,7 +1140,7 @@ class IndexDB {
       return false;
     }
     bool err = false;
-    cache_->append(kbuf, ksiz, vbuf, vsiz);
+    cache_->set(kbuf, ksiz, vbuf, vsiz);
     csiz_ += ksiz + vsiz;
     if (csiz_ > clim_ && !flush_cache()) err = false;
     return !err;
@@ -1180,7 +1180,7 @@ class IndexDB {
     }
     bool err = false;
     if (!clean_dbs(kbuf, ksiz)) err = true;
-    cache_->append(kbuf, ksiz, vbuf, vsiz);
+    cache_->set(kbuf, ksiz, vbuf, vsiz);
     csiz_ += ksiz + vsiz;
     if (csiz_ > clim_ && !flush_cache()) err = false;
     return !err;

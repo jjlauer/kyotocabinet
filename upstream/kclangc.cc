@@ -440,6 +440,16 @@ char* kcdbget(KCDB* db, const char* kbuf, size_t ksiz, size_t* sp) {
 
 
 /**
+ * Check the existence of a record.
+ */
+int32_t kcdbcheck(KCDB* db, const char* kbuf, size_t ksiz) {
+  _assert_(db && kbuf && ksiz <= MEMMAXSIZ);
+  PolyDB* pdb = (PolyDB*)db;
+  return pdb->check(kbuf, ksiz);
+}
+
+
+/**
  * Retrieve the value of a record.
  */
 int32_t kcdbgetbuf(KCDB* db, const char* kbuf, size_t ksiz, char* vbuf, size_t max) {

@@ -1858,11 +1858,14 @@ bool CondVar::wait(Mutex* mutex, double sec) {
   while (true) {
     if (::WaitForSingleObject(core->sev, sec * 1000) == WAIT_TIMEOUT) {
       ::EnterCriticalSection(&core->mutex);
-      core->wait--;
-      ::SetEvent(core->fev);
+      if (::WaitForSingleObject(core->sev, 0) == WAIT_TIMEOUT) {
+        core->wait--;
+        ::SetEvent(core->fev);
+        ::LeaveCriticalSection(&core->mutex);
+        ::EnterCriticalSection(mymutex);
+        return false;
+      }
       ::LeaveCriticalSection(&core->mutex);
-      ::EnterCriticalSection(mymutex);
-      return false;
     }
     ::EnterCriticalSection(&core->mutex);
     if (core->wake > 0) {

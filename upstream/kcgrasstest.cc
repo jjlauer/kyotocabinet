@@ -1803,13 +1803,20 @@ static int32_t procwicked(int64_t rnum, int32_t thnum, int32_t itnum,
                 break;
               }
               case 7: {
-                size_t rsiz;
-                char* rbuf = db_->seize(kbuf, ksiz, &rsiz);
-                if (rbuf) {
-                  delete[] rbuf;
-                } else if (db_->error() != kc::BasicDB::Error::NOREC) {
-                  dberrprint(db_, __LINE__, "DB::seize");
-                  err_ = true;
+                if (myrand(2) == 0) {
+                  if (db_->check(kbuf, ksiz) < 0 && db_->error() != kc::BasicDB::Error::NOREC) {
+                    dberrprint(db_, __LINE__, "DB::check");
+                    err_ = true;
+                  }
+                } else {
+                  size_t rsiz;
+                  char* rbuf = db_->seize(kbuf, ksiz, &rsiz);
+                  if (rbuf) {
+                    delete[] rbuf;
+                  } else if (db_->error() != kc::BasicDB::Error::NOREC) {
+                    dberrprint(db_, __LINE__, "DB::seize");
+                    err_ = true;
+                  }
                 }
                 break;
               }

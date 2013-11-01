@@ -582,6 +582,16 @@ char* kcdbget(KCDB* db, const char* kbuf, size_t ksiz, size_t* sp);
 
 
 /**
+ * Check the existence of a record.
+ * @param db a database object.
+ * @param kbuf the pointer to the key region.
+ * @param ksiz the size of the key region.
+ * @return the size of the value, or -1 on failure.
+ */
+int32_t kcdbcheck(KCDB* db, const char* kbuf, size_t ksiz);
+
+
+/**
  * Retrieve the value of a record.
  * @param db a database object.
  * @param kbuf the pointer to the key region.

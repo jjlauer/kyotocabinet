@@ -1,3 +1,13 @@
+2012-05-24  FAL Labs  <info@fallabs.com>
+
+	* kcthread.cc (CondVar::wait): a bug on Win32 was fixed.
+
+	* kcdbext.h (IndexDB::set, IndexDB::replace): a bug of updating existing records was fixed.
+
+	* kcdb.h (DB::check): new function.
+
+	- Release: 1.2.76
+
 2012-03-28  FAL Labs  <info@fallabs.com>
 
 	* kcpolydb.h (PolyDB::match_similar): supressed warnings on signedness.
