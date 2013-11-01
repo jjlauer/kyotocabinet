@@ -2004,7 +2004,13 @@ class PlantDB : public BasicDB {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       return false;
     }
-    return db_.defrag(step);
+    bool err = false;
+    if (step < 1 && writer_) {
+      if (!clean_leaf_cache()) err = true;
+      if (!clean_inner_cache()) err = true;
+    }
+    if (!db_.defrag(step)) err = true;
+    return !err;
   }
   /**
    * Get the status flags.

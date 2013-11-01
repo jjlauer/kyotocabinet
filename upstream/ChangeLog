@@ -1,3 +1,9 @@
+2011-03-08  FAL Labs  <info@fallabs.com>
+
+	* kcplantdb.h (PlantDB::defrag): dirty buffer clean-up was added.
+
+	- Release: 1.2.50
+
 2011-03-06  FAL Labs  <info@fallabs.com>
 
 	* kcutil.h (hexdecode): a bug of boundary violation was fixed.

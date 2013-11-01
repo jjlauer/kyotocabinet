@@ -667,6 +667,16 @@ check-poly :
 	kcpolytest mapred -tmp . -dbnum 2 -clim 10k -xnl -xnc \
 	  casket.kct 10000
 	kcpolytest mapred -rnd -dbnum 2 -clim 10k casket.kct 10000
+	kcpolytest index -set "casket.kct#idxclim=32k" 10000
+	kcpolytest index -get "casket.kct" 10000
+	kcpolytest index -rem "casket.kct" 10000
+	kcpolytest index -etc "casket.kct#idxclim=32k" 10000
+	kcpolytest index -th 4 -rnd -set \
+	  "casket.kct#idxclim=32k#idxdbnum=4" 10000
+	kcpolytest index -th 4 -rnd -get "casket.kct" 10000
+	kcpolytest index -th 4 -rnd -rem "casket.kct" 10000
+	kcpolytest index -th 4 -rnd -etc \
+	  "casket.kct#idxclim=32k#idxdbnum=4" 10000
 	-del casket* /F /Q > NUL: 2>&1
 	-rd casket casket.wal casket.tmp casket-para casket.kcd casket.kcf /S /Q > NUL: 2>&1
 	kcpolytest order -rnd "casket.kch#opts=s#bnum=256" 1000
