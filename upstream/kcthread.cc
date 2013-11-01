@@ -2083,7 +2083,7 @@ int64_t AtomicInt64::add(int64_t val) {
 bool AtomicInt64::cas(int64_t oval, int64_t nval) {
 #if (defined(_SYS_MSVC_) || defined(_SYS_MINGW_)) && defined(_SYS_WIN64_)
   _assert_(true);
-  return ::InterlockedCompareExchange((uint64_t*)&value_, nval, oval) == nval;
+  return ::InterlockedCompareExchange((uint64_t*)&value_, nval, oval) == oval;
 #elif _KC_GCCATOMIC
   _assert_(true);
   bool rv = __sync_bool_compare_and_swap(&value_, oval, nval);

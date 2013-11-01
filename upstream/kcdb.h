@@ -339,36 +339,39 @@ class DB {
    * @param kbuf the pointer to the key region.
    * @param ksiz the size of the key region.
    * @param num the additional number.
+   * @param orig the origin number if no record corresponds to the key.  If it is INT64MIN and
+   * no record corresponds, this function fails.  If it is INT64MAX, the value is set as the
+   * additional number regardless of the current value.
    * @return the result value, or kyotocabinet::INT64MIN on failure.
-   * @note If no record corresponds to the key, a new record is created with the initial value
-   * set by the additional value.  The value is serialized as an 8-byte binary integer in
-   * big-endian order, not a decimal string.  If existing value is not 8-byte, this function
-   * fails.
+   * @note The value is serialized as an 8-byte binary integer in big-endian order, not a decimal
+   * string.  If existing value is not 8-byte, this function fails.
    */
-  virtual int64_t increment(const char* kbuf, size_t ksiz, int64_t num) = 0;
+  virtual int64_t increment(const char* kbuf, size_t ksiz, int64_t num, int64_t orig = 0) = 0;
   /**
    * Add a number to the numeric integer value of a record.
    * @note Equal to the original DB::increment method except that the parameter is std::string.
    */
-  virtual int64_t increment(const std::string& key, int64_t num) = 0;
+  virtual int64_t increment(const std::string& key, int64_t num, int64_t orig = 0) = 0;
   /**
    * Add a number to the numeric double value of a record.
    * @param kbuf the pointer to the key region.
    * @param ksiz the size of the key region.
    * @param num the additional number.
+   * @param orig the origin number if no record corresponds to the key.  If it is negative
+   * infinity and no record corresponds, this function fails.  If it is positive infinity, the
+   * value is set as the additional number regardless of the current value.
    * @return the result value, or Not-a-number on failure.
-   * @note If no record corresponds to the key, a new record is created with the initial value
-   * set by the additional value.  The value is serialized as an 16-byte binary fixed-point
-   * number in big-endian order, not a decimal string.  If existing value is not 16-byte, this
-   * function fails.
+   * @note The value is serialized as an 16-byte binary fixed-point number in big-endian order,
+   * not a decimal string.  If existing value is not 16-byte, this function fails.
    */
-  virtual double increment_double(const char* kbuf, size_t ksiz, double num) = 0;
+  virtual double increment_double(const char* kbuf, size_t ksiz, double num,
+                                  double orig = 0) = 0;
   /**
    * Add a number to the numeric double value of a record.
    * @note Equal to the original DB::increment_double method except that the parameter is
    * std::string.
    */
-  virtual double increment_double(const std::string& key, double num) = 0;
+  virtual double increment_double(const std::string& key, double num, double orig = 0) = 0;
   /**
    * Perform compare-and-swap.
    * @param kbuf the pointer to the key region.
@@ -1479,17 +1482,18 @@ class BasicDB : public DB {
    * @param kbuf the pointer to the key region.
    * @param ksiz the size of the key region.
    * @param num the additional number.
+   * @param orig the origin number if no record corresponds to the key.  If it is INT64MIN and
+   * no record corresponds, this function fails.  If it is INT64MAX, the value is set as the
+   * additional number regardless of the current value.
    * @return the result value, or kyotocabinet::INT64MIN on failure.
-   * @note If no record corresponds to the key, a new record is created with the initial value
-   * set by the additional value.  The value is serialized as an 8-byte binary integer in
-   * big-endian order, not a decimal string.  If existing value is not 8-byte, this function
-   * fails.
+   * @note The value is serialized as an 8-byte binary integer in big-endian order, not a decimal
+   * string.  If existing value is not 8-byte, this function fails.
    */
-  int64_t increment(const char* kbuf, size_t ksiz, int64_t num) {
+  int64_t increment(const char* kbuf, size_t ksiz, int64_t num, int64_t orig = 0) {
     _assert_(kbuf && ksiz <= MEMMAXSIZ);
     class VisitorImpl : public Visitor {
      public:
-      explicit VisitorImpl(int64_t num) : num_(num), big_(0) {}
+      explicit VisitorImpl(int64_t num, int64_t orig) : num_(num), orig_(orig), big_(0) {}
       int64_t num() {
         return num_;
       }
@@ -1501,11 +1505,15 @@ class BasicDB : public DB {
           return NOP;
         }
         int64_t onum;
-        std::memcpy(&onum, vbuf, vsiz);
-        onum = ntoh64(onum);
-        if (num_ == 0) {
-          num_ = onum;
-          return NOP;
+        if (orig_ == INT64MAX) {
+          onum = 0;
+        } else {
+          std::memcpy(&onum, vbuf, vsiz);
+          onum = ntoh64(onum);
+          if (num_ == 0) {
+            num_ = onum;
+            return NOP;
+          }
         }
         num_ += onum;
         big_ = hton64(num_);
@@ -1513,15 +1521,21 @@ class BasicDB : public DB {
         return (const char*)&big_;
       }
       const char* visit_empty(const char* kbuf, size_t ksiz, size_t* sp) {
+        if (orig_ == INT64MIN) {
+          num_ = INT64MIN;
+          return NOP;
+        }
+        if (orig_ != INT64MAX) num_ += orig_;
         big_ = hton64(num_);
         *sp = sizeof(big_);
         return (const char*)&big_;
       }
       int64_t num_;
+      int64_t orig_;
       uint64_t big_;
     };
-    VisitorImpl visitor(num);
-    if (!accept(kbuf, ksiz, &visitor, true)) return INT64MIN;
+    VisitorImpl visitor(num, orig);
+    if (!accept(kbuf, ksiz, &visitor, num != 0 || orig != INT64MIN)) return INT64MIN;
     num = visitor.num();
     if (num == INT64MIN) {
       set_error(_KCCODELINE_, Error::LOGIC, "logical inconsistency");
@@ -1533,26 +1547,28 @@ class BasicDB : public DB {
    * Add a number to the numeric value of a record.
    * @note Equal to the original DB::increment method except that the parameter is std::string.
    */
-  int64_t increment(const std::string& key, int64_t num) {
+  int64_t increment(const std::string& key, int64_t num, int64_t orig = 0) {
     _assert_(true);
-    return increment(key.c_str(), key.size(), num);
+    return increment(key.c_str(), key.size(), num, orig);
   }
   /**
    * Add a number to the numeric double value of a record.
    * @param kbuf the pointer to the key region.
    * @param ksiz the size of the key region.
    * @param num the additional number.
+   * @param orig the origin number if no record corresponds to the key.  If it is negative
+   * infinity and no record corresponds, this function fails.  If it is positive infinity, the
+   * value is set as the additional number regardless of the current value.
    * @return the result value, or Not-a-number on failure.
-   * @note If no record corresponds to the key, a new record is created with the initial value
-   * set by the additional value.  The value is serialized as an 16-byte binary fixed-point
-   * number in big-endian order, not a decimal string.  If existing value is not 16-byte, this
-   * function fails.
+   * @note The value is serialized as an 16-byte binary fixed-point number in big-endian order,
+   * not a decimal string.  If existing value is not 16-byte, this function fails.
    */
-  double increment_double(const char* kbuf, size_t ksiz, double num) {
+  double increment_double(const char* kbuf, size_t ksiz, double num, double orig = 0) {
     _assert_(kbuf && ksiz <= MEMMAXSIZ);
     class VisitorImpl : public Visitor {
      public:
-      explicit VisitorImpl(double num) : DECUNIT(1000000000000000LL), num_(num), buf_() {}
+      explicit VisitorImpl(double num, double orig) :
+          DECUNIT(1000000000000000LL), num_(num), orig_(orig), buf_() {}
       double num() {
         return num_;
       }
@@ -1564,10 +1580,15 @@ class BasicDB : public DB {
           return NOP;
         }
         int64_t linteg, lfract;
-        std::memcpy(&linteg, vbuf, sizeof(linteg));
-        linteg = ntoh64(linteg);
-        std::memcpy(&lfract, vbuf + sizeof(linteg), sizeof(lfract));
-        lfract = ntoh64(lfract);
+        if (chkinf(orig_) && orig_ >= 0) {
+          linteg = 0;
+          lfract = 0;
+        } else {
+          std::memcpy(&linteg, vbuf, sizeof(linteg));
+          linteg = ntoh64(linteg);
+          std::memcpy(&lfract, vbuf + sizeof(linteg), sizeof(lfract));
+          lfract = ntoh64(lfract);
+        }
         if (lfract == INT64MIN && linteg == INT64MIN) {
           num_ = nan();
           return NOP;
@@ -1578,7 +1599,7 @@ class BasicDB : public DB {
           num_ = -HUGE_VAL;
           return NOP;
         }
-        if (num_ == 0.0) {
+        if (num_ == 0.0 && !(chkinf(orig_) && orig_ >= 0)) {
           num_ = linteg + (double)lfract / DECUNIT;
           return NOP;
         }
@@ -1609,6 +1630,11 @@ class BasicDB : public DB {
         return buf_;
       }
       const char* visit_empty(const char* kbuf, size_t ksiz, size_t* sp) {
+        if (chknan(orig_) || (chkinf(orig_) && orig_ < 0)) {
+          num_ = nan();
+          return NOP;
+        }
+        if (!chkinf(orig_)) num_ += orig_;
         long double dinteg;
         long double dfract = std::modfl(num_, &dinteg);
         int64_t linteg, lfract;
@@ -1631,9 +1657,10 @@ class BasicDB : public DB {
       }
       const int64_t DECUNIT;
       double num_;
+      double orig_;
       char buf_[sizeof(int64_t)*2];
     };
-    VisitorImpl visitor(num);
+    VisitorImpl visitor(num, orig);
     if (!accept(kbuf, ksiz, &visitor, true)) return nan();
     num = visitor.num();
     if (chknan(num)) {
@@ -1647,9 +1674,9 @@ class BasicDB : public DB {
    * @note Equal to the original DB::increment_double method except that the parameter is
    * std::string.
    */
-  double increment_double(const std::string& key, double num) {
+  double increment_double(const std::string& key, double num, double orig) {
     _assert_(true);
-    return increment_double(key.c_str(), key.size(), num);
+    return increment_double(key.c_str(), key.size(), num, orig);
   }
   /**
    * Perform compare-and-swap.

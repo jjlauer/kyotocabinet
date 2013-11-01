@@ -140,8 +140,8 @@ module kyotocabinet {
     boolean add(in string key, in string value);
     boolean replace(in string key, in string value);
     boolean append(in string key, in string value);
-    long long increment(in string key, in long long num);
-    double increment_double(in string key, in double num);
+    long long increment(in string key, in long long num, in long long orig);
+    double increment_double(in string key, in double num, in double orig);
     boolean cas(in string key, in string oval, in string nval);
     boolean remove(in string key);
     string get(in string key);

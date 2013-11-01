@@ -1856,14 +1856,18 @@ static int32_t procwicked(const char* path, int64_t rnum, int32_t thnum, int32_t
               case 4: {
                 if (myrand(2) == 0) {
                   int64_t num = myrand(rnum_);
-                  if (db_->increment(kbuf, ksiz, num) == kc::INT64MIN &&
+                  int64_t orig = myrand(10) == 0 ? kc::INT64MIN : myrand(rnum_);
+                  if (myrand(10) == 0) orig = orig == kc::INT64MIN ? kc::INT64MAX : -orig;
+                  if (db_->increment(kbuf, ksiz, num, orig) == kc::INT64MIN &&
                       db_->error() != kc::BasicDB::Error::LOGIC) {
                     dberrprint(db_, __LINE__, "DB::increment");
                     err_ = true;
                   }
                 } else {
                   double num = myrand(rnum_ * 10) / (myrand(rnum_) + 1.0);
-                  if (kc::chknan(db_->increment_double(kbuf, ksiz, num)) &&
+                  double orig = myrand(10) == 0 ? -kc::inf() : myrand(rnum_);
+                  if (myrand(10) == 0) orig = -orig;
+                  if (kc::chknan(db_->increment_double(kbuf, ksiz, num, orig)) &&
                       db_->error() != kc::BasicDB::Error::LOGIC) {
                     dberrprint(db_, __LINE__, "DB::increment_double");
                     err_ = true;

@@ -90,9 +90,9 @@
 
 #endif
 
-#define _KC_VERSION    "1.2.55"
+#define _KC_VERSION    "1.2.56"
 #define _KC_LIBVER     9
-#define _KC_LIBREV     16
+#define _KC_LIBREV     17
 #define _KC_FMTVER     5
 
 #if defined(_MYBIGEND)
