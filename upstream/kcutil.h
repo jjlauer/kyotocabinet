@@ -1726,7 +1726,7 @@ inline char* urlencode(const void* buf, size_t size) {
   for (const unsigned char* ep = rp + size; rp < ep; rp++) {
     int32_t c = *rp;
     if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-        (c >= '0' && c <= '9') || (c != '\0' && std::strchr("_-.!~*'()", c))) {
+        (c >= '0' && c <= '9') || (c != '\0' && std::strchr("_-.~", c))) {
       *(wp++) = c;
     } else {
       *(wp++) = '%';

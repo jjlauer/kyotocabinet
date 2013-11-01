@@ -491,6 +491,7 @@ class BasicDB : public DB {
     TYPETREE = 0x31,                     ///< file tree database
     TYPEDIR = 0x40,                      ///< directory hash database
     TYPEFOREST = 0x41,                   ///< directory tree database
+    TYPETEXT = 0x50,                     ///< plain text database
     TYPEMISC = 0x80                      ///< miscellaneous database
   };
   /**

@@ -230,7 +230,10 @@ class MapReduce {
    */
   bool execute(BasicDB* db, const std::string& tmppath = "", uint32_t opts = 0) {
     int64_t count = db->count();
-    if (count < 0) return false;
+    if (count < 0) {
+      if (db->error() != BasicDB::Error::NOIMPL) return false;
+      count = 0;
+    }
     bool err = false;
     double stime, etime;
     db_ = db;
@@ -322,7 +325,7 @@ class MapReduce {
     if (opts & XPARAFLS) flsths_ = new std::deque<FlushThread*>;
     if (opts & XNOLOCK) {
       MapChecker mapchecker;
-      MapVisitor mapvisitor(this, &mapchecker, db->count());
+      MapVisitor mapvisitor(this, &mapchecker, count);
       mapvisitor.visit_before();
       if (!err) {
         BasicDB::Cursor* cur = db->cursor();
@@ -342,7 +345,7 @@ class MapReduce {
       mapvisitor.visit_after();
     } else if (opts & XPARAMAP) {
       MapChecker mapchecker;
-      MapVisitor mapvisitor(this, &mapchecker, db->count());
+      MapVisitor mapvisitor(this, &mapchecker, count);
       rlocks_ = new SlottedMutex(RLOCKSLOT);
       if (!err && !db->scan_parallel(&mapvisitor, mapthnum_, &mapchecker)) {
         db_->set_error(_KCCODELINE_, BasicDB::Error::LOGIC, "mapper failed");
@@ -353,7 +356,7 @@ class MapReduce {
       if (mapvisitor.error()) err = true;
     } else {
       MapChecker mapchecker;
-      MapVisitor mapvisitor(this, &mapchecker, db->count());
+      MapVisitor mapvisitor(this, &mapchecker, count);
       if (!err && !db->iterate(&mapvisitor, false, &mapchecker)) err = true;
       if (mapvisitor.error()) {
         db_->set_error(_KCCODELINE_, BasicDB::Error::LOGIC, "mapper failed");
@@ -445,7 +448,7 @@ class MapReduce {
       cache_->append(kbuf, ksiz, rbuf, rsiz);
     }
     if (rbuf != stack) delete[] rbuf;
-    csiz_ += rsiz;
+    csiz_ += sizevarnum(ksiz) + ksiz + rsiz;
     return !err;
   }
  private:

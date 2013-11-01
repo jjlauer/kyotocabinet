@@ -16,7 +16,7 @@ SDKPATH = C:\Program Files\Microsoft SDKs\Windows\v7.0A
 LIBRARYFILES = kyotocabinet.lib
 LIBOBJFILES = kcutil.obj kcdb.obj kcthread.obj kcfile.obj \
   kccompress.obj kccompare.obj kcmap.obj kcregex.obj kcplantdb.obj \
-  kcprotodb.obj kcstashdb.obj kccachedb.obj kchashdb.obj kcdirdb.obj \
+  kcprotodb.obj kcstashdb.obj kccachedb.obj kchashdb.obj kcdirdb.obj kctextdb.obj \
   kcpolydb.obj kcdbext.obj kclangc.obj
 COMMANDFILES = kcutiltest.exe kcutilmgr.exe kcprototest.exe \
   kcstashtest.exe kccachetest.exe kcgrasstest.exe \
@@ -682,12 +682,23 @@ check-poly :
 	  "casket.kct#idxclim=32k#idxdbnum=4" 10000
 	-del casket* /F /Q > NUL: 2>&1
 	-rd casket casket.wal casket.tmp casket-para casket.kcd casket.kcf /S /Q > NUL: 2>&1
+	kcpolytest order -rnd "casket.kcx" 10000
+	kcpolytest order -th 4 -rnd "casket.kcx" 10000
+	kcpolytest wicked "casket.kcx" 10000
+	kcpolytest wicked -th 4 "casket.kcx" 10000
+	kcpolymgr list "casket.kcx" > check.in
+	kcpolymgr list -max 1000 "casket.kcx" > check.in
+	kcpolytest mapred "casket.kcx" 10000
+	kcpolytest mapred -xpm -xpr -xpf "casket.kcx" 10000
+	-del casket* /F /Q > NUL: 2>&1
+	-rd casket casket.wal casket.tmp casket-para casket.kcd casket.kcf /S /Q > NUL: 2>&1
 	kcpolytest order -rnd "casket.kch#opts=s#bnum=256" 1000
 	kcpolytest order -rnd "casket.kct#opts=l#psiz=256" 1000
 	kcpolytest order -rnd "casket.kcd#opts=c#bnum=256" 500
 	kcpolytest order -rnd "casket.kcf#opts=c#psiz=256" 500
+	kcpolytest order -rnd "casket.kcx" 500
 	kcpolymgr merge -add "casket#type=kct" \
-	  casket.kch casket.kct casket.kcd casket.kcf
+	  casket.kch casket.kct casket.kcd casket.kcf casket.kcx
 	-del casket* /F /Q > NUL: 2>&1
 	-rd casket casket.wal casket.tmp casket-para casket.kcd casket.kcf /S /Q > NUL: 2>&1
 	kcpolytest misc "casket#type=-"
@@ -870,18 +881,23 @@ kcdirdb.obj : kccommon.h kcutil.h kcdb.h kcthread.h kcfile.h kccompress.h kccomp
   kcmap.h kcregex.h \
   kcplantdb.h kcdirdb.h
 
+kctextdb.obj : kccommon.h kcutil.h kcdb.h kcthread.h kcfile.h kccompress.h kccompare.h \
+  kcmap.h kcregex.h \
+  kcplantdb.h kctextdb.h
+
 kcpolydb.obj : kccommon.h kcutil.h kcdb.h kcthread.h kcfile.h kccompress.h kccompare.h \
   kcmap.h kcregex.h \
-  kcplantdb.h kcprotodb.h kcstashdb.h kccachedb.h kchashdb.h kcdirdb.h kcpolydb.h
+  kcplantdb.h kcprotodb.h kcstashdb.h kccachedb.h kchashdb.h kcdirdb.h kctextdb.h kcpolydb.h
 
 kcdbext.obj : kccommon.h kcutil.h kcdb.h kcthread.h kcfile.h kccompress.h kccompare.h \
   kcmap.h kcregex.h \
-  kcplantdb.h kcprotodb.h kcstashdb.h kccachedb.h kchashdb.h kcdirdb.h kcpolydb.h kcdbext.h
+  kcplantdb.h kcprotodb.h kcstashdb.h kccachedb.h kchashdb.h kcdirdb.h kctextdb.h \
+  kcpolydb.h kcdbext.h
 
 kclangc.obj : kccommon.h kcutil.h kcdb.h kcthread.h kcfile.h kccompress.h kccompare.h \
   kcmap.h kcregex.h \
-  kcplantdb.h kcprotodb.h kcstashdb.h kccachedb.h kchashdb.h kcdirdb.h kcpolydb.h kcdbext.h \
-  kclangc.h
+  kcplantdb.h kcprotodb.h kcstashdb.h kccachedb.h kchashdb.h kcdirdb.h kctextdb.h \
+  kcpolydb.h kcdbext.h kclangc.h
 
 kcutiltest.obj kcutilmgr.obj : \
   kccommon.h kcdb.h kcutil.h kcthread.h kcfile.h kccompress.h kccompare.h \
@@ -916,13 +932,13 @@ kcdirtest.obj kcdirmgr.obj kcforesttest.obj kcforestmgr.obj : \
 kcpolytest.obj kcpolymgr.obj : \
   kccommon.h kcdb.h kcutil.h kcthread.h kcfile.h kccompress.h kccompare.h \
   kcmap.h kcregex.h \
-  kcplantdb.h kcprotodb.h kcstashdb.h kccachedb.h kchashdb.h kcdirdb.h \
+  kcplantdb.h kcprotodb.h kcstashdb.h kccachedb.h kchashdb.h kcdirdb.h kctextdb.h \
   kcpolydb.h kcdbext.h cmdcommon.h
 
 kclangctest.obj : \
   kccommon.h kcdb.h kcutil.h kcthread.h kcfile.h kccompress.h kccompare.h \
   kcmap.h kcregex.h \
-  kcplantdb.h kcprotodb.h kcstashdb.h kccachedb.h kchashdb.h kcdirdb.h \
+  kcplantdb.h kcprotodb.h kcstashdb.h kccachedb.h kchashdb.h kcdirdb.h kctextdb.h \
   kcpolydb.h kcdbext.h kclangc.h
 
 

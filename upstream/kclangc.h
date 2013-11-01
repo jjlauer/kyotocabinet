@@ -298,25 +298,28 @@ void kcdbdel(KCDB* db);
  * Open a database file.
  * @param db a database object.
  * @param path the path of a database file.  If it is "-", the database will be a prototype
- * hash database.  If it is "+", the database will be a prototype tree database.  If it is
- * "*", the database will be a cache hash database.  If it is "%", the database will be a
- * cache tree database.  If its suffix is ".kch", the database will be a file hash database.
- * If its suffix is ".kct", the database will be a file tree database.  If its suffix is
- * ".kcd", the database will be a directory hash database.  If its suffix is ".kcf", the
- * database will be a directory tree database.  Otherwise, this function fails.  Tuning
- * parameters can trail the name, separated by "#".  Each parameter is composed of the name
- * and the value, separated by "=".  If the "type" parameter is specified, the database type
- * is determined by the value in "-", "+", "*", "%", "kch", "kct", "kcd", and "kcf".  All
- * database types support the logging parameters of "log", "logkinds", and "logpx".  The
- * prototype hash database and the prototype tree database do not support any other tuning
- * parameter.  The cache hash database supports "opts", "bnum", "zcomp", "capcount", "capsize",
- * and "zkey".  The cache tree database supports all parameters of the cache hash database
- * except for capacity limitation, and supports "psiz", "rcomp", "pccap" in addition.  The
- * file hash database supports "apow", "fpow", "opts", "bnum", "msiz", "dfunit", "zcomp", and
- * "zkey".  The file tree database supports all parameters of the file hash database and
- * "psiz", "rcomp", "pccap" in addition.  The directory hash database supports "opts", "zcomp",
- * and "zkey".  The directory tree database supports all parameters of the directory hash
- * database and "psiz", "rcomp", "pccap" in addition.
+ * hash database.  If it is "+", the database will be a prototype tree database.  If it is ":",
+ * the database will be a stash database.  If it is "*", the database will be a cache hash
+ * database.  If it is "%", the database will be a cache tree database.  If its suffix is
+ * ".kch", the database will be a file hash database.  If its suffix is ".kct", the database
+ * will be a file tree database.  If its suffix is ".kcd", the database will be a directory
+ * hash database.  If its suffix is ".kcf", the database will be a directory tree database.
+ * If its suffix is ".kcx", the database will be a plain text database.  Otherwise, this
+ * function fails.  Tuning parameters can trail the name, separated by "#".  Each parameter is
+ * composed of the name and the value, separated by "=".  If the "type" parameter is specified,
+ * the database type is determined by the value in "-", "+", ":", "*", "%", "kch", "kct",
+ * "kcd", kcf", and "kcx".  All database types support the logging parameters of "log",
+ * "logkinds", and "logpx".  The prototype hash database and the prototype tree database do
+ * not support any other tuning parameter.  The stash database supports "bnum".  The cache
+ * hash database supports "opts", "bnum", "zcomp", "capcnt", "capsiz", and "zkey".  The cache
+ * tree database supports all parameters of the cache hash database except for capacity
+ * limitation, and supports "psiz", "rcomp", "pccap" in addition.  The file hash database
+ * supports "apow", "fpow", "opts", "bnum", "msiz", "dfunit", "zcomp", and "zkey".  The file
+ * tree database supports all parameters of the file hash database and "psiz", "rcomp",
+ * "pccap" in addition.  The directory hash database supports "opts", "zcomp", and "zkey".
+ * The directory tree database supports all parameters of the directory hash database and
+ * "psiz", "rcomp", "pccap" in addition.  The plain text database does not support any other
+ * tuning parameter.
  * @param mode the connection mode.  KCOWRITER as a writer, KCOREADER as a reader.
  * The following may be added to the writer mode by bitwise-or: KCOCREATE, which means
  * it creates a new database if the file does not exist, KCOTRUNCATE, which means it

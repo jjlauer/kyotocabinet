@@ -25,7 +25,6 @@
 #include <kcmap.h>
 #include <kcregex.h>
 #include <kcdb.h>
-#include <kcplantdb.h>
 
 #if !defined(_KC_PREFIX)
 #define _KC_PREFIX       "*"

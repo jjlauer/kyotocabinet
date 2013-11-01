@@ -1,3 +1,11 @@
+2011-06-28  FAL Labs  <info@fallabs.com>
+
+	* kcutil.h (urlencode): modified for compatibility with RFC 3986.
+
+	* kctextdb.h, kctextdb.cc: new files.
+
+	- Release: 1.2.65
+
 2011-06-15  FAL Labs  <info@fallabs.com>
 
 	* kcmap.h (TinyHasyMap::accept_parallel): new function.

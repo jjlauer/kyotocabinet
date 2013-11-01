@@ -31,6 +31,7 @@
 #include <kccachedb.h>
 #include <kchashdb.h>
 #include <kcdirdb.h>
+#include <kctextdb.h>
 
 namespace kyotocabinet {                 // common namespace
 
@@ -386,20 +387,22 @@ class PolyDB : public BasicDB {
    * ".kch", the database will be a file hash database.  If its suffix is ".kct", the database
    * will be a file tree database.  If its suffix is ".kcd", the database will be a directory
    * hash database.  If its suffix is ".kcf", the database will be a directory tree database.
-   * Otherwise, this function fails.  Tuning parameters can trail the name, separated by "#".
-   * Each parameter is composed of the name and the value, separated by "=".  If the "type"
-   * parameter is specified, the database type is determined by the value in "-", "+", ":", "*",
-   * "%", "kch", "kct", "kcd", and "kcf".  All database types support the logging parameters of
-   * "log", "logkinds", and "logpx".  The prototype hash database and the prototype tree
-   * database do not support any other tuning parameter.  The stash database supports "bnum".
-   * The cache hash database supports "opts", "bnum", "zcomp", "capcnt", "capsiz", and "zkey".
-   * The cache tree database supports all parameters of the cache hash database except for
-   * capacity limitation, and supports "psiz", "rcomp", "pccap" in addition.  The file hash
-   * database supports "apow", "fpow", "opts", "bnum", "msiz", "dfunit", "zcomp", and "zkey".
-   * The file tree database supports all parameters of the file hash database and "psiz",
-   * "rcomp", "pccap" in addition.  The directory hash database supports "opts", "zcomp", and
-   * "zkey".  The directory tree database supports all parameters of the directory hash database
-   * and "psiz", "rcomp", "pccap" in addition.
+   * If its suffix is ".kcx", the database will be a plain text database.  Otherwise, this
+   * function fails.  Tuning parameters can trail the name, separated by "#".  Each parameter is
+   * composed of the name and the value, separated by "=".  If the "type" parameter is specified,
+   * the database type is determined by the value in "-", "+", ":", "*", "%", "kch", "kct",
+   * "kcd", kcf", and "kcx".  All database types support the logging parameters of "log",
+   * "logkinds", and "logpx".  The prototype hash database and the prototype tree database do
+   * not support any other tuning parameter.  The stash database supports "bnum".  The cache
+   * hash database supports "opts", "bnum", "zcomp", "capcnt", "capsiz", and "zkey".  The cache
+   * tree database supports all parameters of the cache hash database except for capacity
+   * limitation, and supports "psiz", "rcomp", "pccap" in addition.  The file hash database
+   * supports "apow", "fpow", "opts", "bnum", "msiz", "dfunit", "zcomp", and "zkey".  The file
+   * tree database supports all parameters of the file hash database and "psiz", "rcomp",
+   * "pccap" in addition.  The directory hash database supports "opts", "zcomp", and "zkey".
+   * The directory tree database supports all parameters of the directory hash database and
+   * "psiz", "rcomp", "pccap" in addition.  The plain text database does not support any other
+   * tuning parameter.
    * @param mode the connection mode.  PolyDB::OWRITER as a writer, PolyDB::OREADER as a
    * reader.  The following may be added to the writer mode by bitwise-or: PolyDB::OCREATE,
    * which means it creates a new database if the file does not exist, PolyDB::OTRUNCATE, which
@@ -507,6 +510,10 @@ class PolyDB : public BasicDB {
           type = TYPEDIR;
         } else if (!std::strcmp(pv, "kcf") || !std::strcmp(pv, "fdb")) {
           type = TYPEFOREST;
+        } else if (!std::strcmp(pv, "kcx") || !std::strcmp(pv, "xdb") ||
+                   !std::strcmp(pv, "txt") || !std::strcmp(pv, "text") ||
+                   !std::strcmp(pv, "tsv") || !std::strcmp(pv, "csv")) {
+          type = TYPETEXT;
         }
       }
     }
@@ -543,6 +550,9 @@ class PolyDB : public BasicDB {
           } else if (!std::strcmp(value, "kcf") || !std::strcmp(value, "fdb") ||
                      !std::strcmp(value, "for") || !std::strcmp(value, "forest")) {
             type = TYPEFOREST;
+          } else if (!std::strcmp(value, "kcx") || !std::strcmp(value, "xdb") ||
+                     !std::strcmp(value, "txt") || !std::strcmp(value, "text")) {
+            type = TYPETEXT;
           }
         } else if (!std::strcmp(key, "log") || !std::strcmp(key, "logger")) {
           logname = value;
@@ -877,6 +887,21 @@ class PolyDB : public BasicDB {
         if (pccap > 0) fdb->tune_page_cache(pccap);
         if (rcomp) fdb->tune_comparator(rcomp);
         db = fdb;
+        break;
+      }
+      case TYPETEXT: {
+        TextDB* xdb = new TextDB();
+        if (stdlogger_) {
+          xdb->tune_logger(stdlogger_, logkinds);
+        } else if (logger_) {
+          xdb->tune_logger(logger_, logkinds_);
+        }
+        if (stdmtrigger_) {
+          xdb->tune_meta_trigger(stdmtrigger_);
+        } else if (mtrigger_) {
+          xdb->tune_meta_trigger(mtrigger_);
+        }
+        db = xdb;
         break;
       }
     }

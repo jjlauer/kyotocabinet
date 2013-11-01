@@ -1773,13 +1773,17 @@ static int32_t procwicked(const char* path, int64_t rnum, int32_t thnum, int32_t
           if (tran) {
             if (myrand(2) == 0) {
               if (!db_->begin_transaction(myrand(rnum_) == 0)) {
-                dberrprint(db_, __LINE__, "DB::begin_transaction");
+                if (db_->error() != kc::BasicDB::Error::NOIMPL) {
+                  dberrprint(db_, __LINE__, "DB::begin_transaction");
+                  tran = false;
+                  err_ = true;
+                }
                 tran = false;
-                err_ = true;
               }
             } else {
               if (!db_->begin_transaction_try(myrand(rnum_) == 0)) {
-                if (db_->error() != kc::BasicDB::Error::LOGIC) {
+                if (db_->error() != kc::BasicDB::Error::LOGIC &&
+                    db_->error() != kc::BasicDB::Error::NOIMPL) {
                   dberrprint(db_, __LINE__, "DB::begin_transaction_try");
                   err_ = true;
                 }

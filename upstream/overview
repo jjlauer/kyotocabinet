@@ -28,6 +28,7 @@ The following classes are most important.  If you are new to Kyoto Cabinet, lear
 @li kyotocabinet::TreeDB -- file tree database, which implements B+ tree on a file
 @li kyotocabinet::DirDB -- directory hash database, which handles respective files in a directory
 @li kyotocabinet::ForestDB -- directory tree database, which implements B+ tree on a directory
+@li kyotocabinet::TextDB -- lined text database, which treats a text file as a database
 @li kyotocabinet::PolyDB -- polymorphic database, dynamic binding of the above databases
 
 @li kyotocabinet::MapReduce -- MapReduce framework to process records in each database
@@ -319,6 +320,7 @@ namespace kyotocabinet {}
  * @file kccachedb.h    cache hash database
  * @file kchashdb.h     file hash database
  * @file kcdirdb.h      directory hash database
+ * @file kctextdb.h     lined text database
  * @file kcpolydb.h     polymorphic database
  * @file kcdbext.h      database extension
  * @file kclangc.h      C language binding
