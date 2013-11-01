@@ -1,3 +1,17 @@
+2011-07-16  FAL Labs  <info@fallabs.com>
+
+	* kcutil.h (kcstrutflen): new function.
+
+	* kcplantdb (PlantDB::write_key): new function.
+
+	* kctextdb (TextDB::write_key): new function.
+
+	* kctextdb.h (TextDB::scan_parallel_impl): performance was improved.
+
+	* kctextdb.h (read_next): a bug of border condition was fixed.
+
+	- Release: 1.2.69
+
 2011-07-14  FAL Labs  <info@fallabs.com>
 
 	* kcutil.h (strutftoucs, strucstoutf): performance was improved.

@@ -23,6 +23,7 @@ File::open(OUTFILE, "w") do |outfile|
     path = info[:path]
     File::open(path) do |infile|
       infile.each do |line|
+        line.force_encoding('UTF-8')
         next if line.start_with?(" ")
         line = line.strip
         head = line.sub(/ *\|.*/, "")

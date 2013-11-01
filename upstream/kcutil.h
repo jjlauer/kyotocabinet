@@ -411,6 +411,24 @@ std::string* strtolower(std::string* str);
 
 
 /**
+ * Check whether a string begins with a key.
+ * @param str the string.
+ * @param key the forward matching key string.
+ * @return true if the target string begins with the key, else, it is false.
+ */
+bool strfwm(const std::string& str, const std::string& key);
+
+
+/**
+ * Check whether a string ends with a key.
+ * @param str the string.
+ * @param key the backward matching key string.
+ * @return true if the target string ends with the key, else, it is false.
+ */
+bool strbwm(const std::string& str, const std::string& key);
+
+
+/**
  * Cut space characters at head or tail of a string.
  * @param str the string to convert.
  * @return the string itself.
@@ -419,7 +437,7 @@ std::string* strtrim(std::string* str);
 
 
 /**
- * Convert a UTF-8 string into a UCS-4 vector.
+ * Convert a UTF-8 string into a UCS-4 array.
  * @param src the source object.
  * @param dest the destination object.
  */
@@ -427,7 +445,7 @@ void strutftoucs(const std::string& src, std::vector<uint32_t>* dest);
 
 
 /**
- * Convert a UCS-4 vector into a UTF-8 string.
+ * Convert a UCS-4 array into a UTF-8 string.
  * @param src the source object.
  * @param dest the destination object.
  */
@@ -730,7 +748,15 @@ bool stribwm(const char* str, const char* key);
 
 
 /**
- * Convert a UTF-8 string into a UCS-4 vector.
+ * Get the number of characters in a UTF-8 string.
+ * @param str the UTF-8 string.
+ * @return the number of characters in the string.
+ */
+size_t strutflen(const char* str);
+
+
+/**
+ * Convert a UTF-8 string into a UCS-4 array.
  * @param src the source object.
  * @param dest the destination object.  It must have enough size.
  * @param np the pointer to the variable into which the number of elements in the destination
@@ -739,9 +765,8 @@ bool stribwm(const char* str, const char* key);
 void strutftoucs(const char* src, uint32_t* dest, size_t* np);
 
 
-
 /**
- * Convert a UCS-4 vector into a UTF-8 string.
+ * Convert a UCS-4 array into a UTF-8 string.
  * @param src the source object.
  * @param snum the number of elements in the source object.
  * @param dest the destination object.  It must have enough size.
@@ -1686,6 +1711,28 @@ inline std::string* strtolower(std::string* str) {
 
 
 /**
+ * Check whether a string begins with a key.
+ */
+inline bool strfwm(const std::string& str, const std::string& key) {
+  _assert_(true);
+  size_t ksiz = key.size();
+  if (ksiz > str.size()) return false;
+  return !std::memcmp(str.data(), key.data(), ksiz);
+}
+
+
+/**
+ * Check whether a string ends with a key.
+ */
+inline bool strbwm(const std::string& str, const std::string& key) {
+  _assert_(true);
+  size_t ksiz = key.size();
+  if (ksiz > str.size()) return false;
+  return !std::memcmp(str.data() + str.size() - ksiz, key.data(), ksiz);
+}
+
+
+/**
  * Cut space characters at head or tail of a string.
  */
 inline std::string* strtrim(std::string* str) {
@@ -1708,7 +1755,7 @@ inline std::string* strtrim(std::string* str) {
 
 
 /**
- * Convert a UTF-8 string into a UCS-4 vector.
+ * Convert a UTF-8 string into a UCS-4 array.
  */
 inline void strutftoucs(const std::string& src, std::vector<uint32_t>* dest) {
   _assert_(dest);
@@ -1720,33 +1767,36 @@ inline void strutftoucs(const std::string& src, std::vector<uint32_t>* dest) {
     if (c < 0x80) {
       dest->push_back(c);
     } else if (c < 0xe0) {
-      if (ri + 1 < size) {
-        dest->push_back(((c & 0x1f) << 6) | (src[ri+1] & 0x3f));
+      if (c >= 0xc0 && ri + 1 < size) {
+        c = ((c & 0x1f) << 6) | (src[ri+1] & 0x3f);
+        if (c >= 0x80) dest->push_back(c);
         ri++;
       }
     } else if (c < 0xf0) {
       if (ri + 2 < size) {
-        dest->push_back(((c & 0x0f) << 12) | ((src[ri+1] & 0x3f) << 6) | (src[ri+2] & 0x3f));
+        c = ((c & 0x0f) << 12) | ((src[ri+1] & 0x3f) << 6) | (src[ri+2] & 0x3f);
+        if (c >= 0x800) dest->push_back(c);
         ri += 2;
       }
     } else if (c < 0xf8) {
       if (ri + 3 < size) {
-        dest->push_back(((c & 0x07) << 18) | ((src[ri+1] & 0x3f) << 12) |
-                        ((src[ri+2] & 0x3f) << 6) | (src[ri+3] & 0x3f));
+        c = ((c & 0x07) << 18) | ((src[ri+1] & 0x3f) << 12) | ((src[ri+2] & 0x3f) << 6) |
+            (src[ri+3] & 0x3f);
+        if (c >= 0x10000) dest->push_back(c);
         ri += 3;
       }
     } else if (c < 0xfc) {
       if (ri + 4 < size) {
-        dest->push_back(((c & 0x03) << 24) | ((src[ri+1] & 0x3f) << 18) |
-                        ((src[ri+2] & 0x3f) << 12) | ((src[ri+3] & 0x3f) << 6) |
-                        (src[ri+4] & 0x3f));
+        c = ((c & 0x03) << 24) | ((src[ri+1] & 0x3f) << 18) | ((src[ri+2] & 0x3f) << 12) |
+            ((src[ri+3] & 0x3f) << 6) | (src[ri+4] & 0x3f);
+        if (c >= 0x200000) dest->push_back(c);
         ri += 4;
       }
     } else if (c < 0xfe) {
       if (ri + 5 < size) {
-        dest->push_back(((c & 0x01) << 30) | ((src[ri+1] & 0x3f) << 24) |
-                        ((src[ri+2] & 0x3f) << 18) | ((src[ri+3] & 0x3f) << 12) |
-                        ((src[ri+4] & 0x3f) << 6) | (src[ri+5] & 0x3f));
+        c = ((c & 0x01) << 30) | ((src[ri+1] & 0x3f) << 24) | ((src[ri+2] & 0x3f) << 18) |
+            ((src[ri+3] & 0x3f) << 12) | ((src[ri+4] & 0x3f) << 6) | (src[ri+5] & 0x3f);
+        if (c >= 0x4000000) dest->push_back(c);
         ri += 5;
       }
     }
@@ -2606,7 +2656,21 @@ inline bool stribwm(const char* str, const char* key) {
 
 
 /**
- * Convert a UTF-8 string into a UCS-4 vector.
+ * Get the number of characters in a UTF-8 string.
+ */
+inline size_t strutflen(const char* str) {
+  _assert_(str);
+  size_t len = 0;
+  while (*str != '\0') {
+    len += (*(unsigned char*)str & 0xc0) != 0x80;
+    str++;
+  }
+  return len;
+}
+
+
+/**
+ * Convert a UTF-8 string into a UCS-4 array.
  */
 inline void strutftoucs(const char* src, uint32_t* dest, size_t* np) {
   _assert_(src && dest && np);
@@ -2618,31 +2682,35 @@ inline void strutftoucs(const char* src, uint32_t* dest, size_t* np) {
       dest[dnum++] = c;
     } else if (c < 0xe0) {
       if (rp[1] != '\0') {
-        dest[dnum++] = ((c & 0x1f) << 6) | (rp[1] & 0x3f);
+        c = ((c & 0x1f) << 6) | (rp[1] & 0x3f);
+        if (c >= 0x80) dest[dnum++] = c;
         rp++;
       }
     } else if (c < 0xf0) {
       if (rp[1] != '\0' && rp[2] != '\0') {
-        dest[dnum++] = ((c & 0x0f) << 12) | ((rp[1] & 0x3f) << 6) | (rp[2] & 0x3f);
+        c = ((c & 0x0f) << 12) | ((rp[1] & 0x3f) << 6) | (rp[2] & 0x3f);
+        if (c >= 0x800) dest[dnum++] = c;
         rp += 2;
       }
     } else if (c < 0xf8) {
       if (rp[1] != '\0' && rp[2] != '\0' && rp[3] != '\0') {
-        dest[dnum++] = ((c & 0x07) << 18) | ((rp[1] & 0x3f) << 12)
-            | ((rp[2] & 0x3f) << 6) | (rp[3] & 0x3f);
+        c = ((c & 0x07) << 18) | ((rp[1] & 0x3f) << 12) | ((rp[2] & 0x3f) << 6) |
+            (rp[3] & 0x3f);
+        if (c >= 0x10000) dest[dnum++] = c;
         rp += 3;
       }
     } else if (c < 0xfc) {
       if (rp[1] != '\0' && rp[2] != '\0' && rp[3] != '\0' && rp[4] != '\0') {
-        dest[dnum++] = ((c & 0x03) << 24) | ((rp[1] & 0x3f) << 18) |
-            ((rp[2] & 0x3f) << 12) | ((rp[3] & 0x3f) << 6) | (rp[4] & 0x3f);
+        c = ((c & 0x03) << 24) | ((rp[1] & 0x3f) << 18) | ((rp[2] & 0x3f) << 12) |
+            ((rp[3] & 0x3f) << 6) | (rp[4] & 0x3f);
+        if (c >= 0x200000) dest[dnum++] = c;
         rp += 4;
       }
     } else if (c < 0xfe) {
       if (rp[1] != '\0' && rp[2] != '\0' && rp[3] != '\0' && rp[4] != '\0' && rp[5] != '\0') {
-        dest[dnum++] = ((c & 0x01) << 30) | ((rp[1] & 0x3f) << 24) |
-            ((rp[2] & 0x3f) << 18) | ((rp[3] & 0x3f) << 12) |
-            ((rp[4] & 0x3f) << 6) | (rp[5] & 0x3f);
+        c = ((c & 0x01) << 30) | ((rp[1] & 0x3f) << 24) | ((rp[2] & 0x3f) << 18) |
+            ((rp[3] & 0x3f) << 12) | ((rp[4] & 0x3f) << 6) | (rp[5] & 0x3f);
+        if (c >= 0x4000000) dest[dnum++] = c;
         rp += 5;
       }
     }

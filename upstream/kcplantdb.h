@@ -2568,7 +2568,7 @@ class PlantDB : public BasicDB {
     if (!node->dirty) return true;
     bool err = false;
     char hbuf[NUMBUFSIZ];
-    size_t hsiz = std::sprintf(hbuf, "%c%llX", LNPREFIX, (long long)node->id);
+    size_t hsiz = write_key(hbuf, LNPREFIX, node->id);
     if (node->dead) {
       if (!db_.remove(hbuf, hsiz) && db_.error().code() != Error::NOREC) err = true;
     } else {
@@ -2623,7 +2623,7 @@ class PlantDB : public BasicDB {
       if (np) return *np;
     }
     char hbuf[NUMBUFSIZ];
-    size_t hsiz = std::sprintf(hbuf, "%c%llX", LNPREFIX, (long long)id);
+    size_t hsiz = write_key(hbuf, LNPREFIX, id);
     class VisitorImpl : public DB::Visitor {
      public:
       explicit VisitorImpl() : node_(NULL) {}
@@ -2946,8 +2946,7 @@ class PlantDB : public BasicDB {
     if (!node->dirty) return true;
     bool err = false;
     char hbuf[NUMBUFSIZ];
-    size_t hsiz = std::sprintf(hbuf, "%c%llX",
-                               INPREFIX, (long long)(node->id - INIDBASE));
+    size_t hsiz = write_key(hbuf, INPREFIX, node->id - INIDBASE);
     if (node->dead) {
       if (!db_.remove(hbuf, hsiz) && db_.error().code() != Error::NOREC) err = true;
     } else {
@@ -2984,7 +2983,7 @@ class PlantDB : public BasicDB {
     InnerNode** np = slot->warm->get(id, InnerCache::MLAST);
     if (np) return *np;
     char hbuf[NUMBUFSIZ];
-    size_t hsiz = std::sprintf(hbuf, "%c%llX", INPREFIX, (long long)(id - INIDBASE));
+    size_t hsiz = write_key(hbuf, INPREFIX, id - INIDBASE);
     class VisitorImpl : public DB::Visitor {
      public:
       explicit VisitorImpl() : node_(NULL) {}
@@ -3834,6 +3833,43 @@ class PlantDB : public BasicDB {
     if (!dump_meta()) err = true;
     if (!db_.synchronize(true, NULL)) err = true;
     return !err;
+  }
+  /**
+   * Write the key pattern into a buffer.
+   * @param kbuf the destination buffer.
+   * @param pc the prefix character.
+   * @param id the ID number of the page.
+   * @return the size of the key pattern.
+   */
+  size_t write_key(char* kbuf, int32_t pc, int64_t num) {
+    _assert_(kbuf && num >= 0);
+    char* wp = kbuf;
+    *(wp++) = pc;
+    bool hit = false;
+    for (size_t i = 0; i < sizeof(num); i++) {
+      uint8_t c = num >> ((sizeof(num) - 1 - i) * 8);
+      uint8_t h = c >> 4;
+      if (h < 10) {
+        if (hit || h != 0) {
+          *(wp++) = '0' + h;
+          hit = true;
+        }
+      } else {
+        *(wp++) = 'A' - 10 + h;
+        hit = true;
+      }
+      uint8_t l = c & 0xf;
+      if (l < 10) {
+        if (hit || l != 0) {
+          *(wp++) = '0' + l;
+          hit = true;
+        }
+      } else {
+        *(wp++) = 'A' - 10 + l;
+        hit = true;
+      }
+    }
+    return wp - kbuf;
   }
   /** Dummy constructor to forbid the use. */
   PlantDB(const PlantDB&);

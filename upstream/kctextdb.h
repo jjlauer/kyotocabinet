@@ -61,7 +61,7 @@ class TextDB : public BasicDB {
      * Constructor.
      * @param db the container database object.
      */
-    explicit Cursor(TextDB* db) : db_(db), off_(INT64MAX), end_(0), queue_() {
+    explicit Cursor(TextDB* db) : db_(db), off_(INT64MAX), end_(0), queue_(), line_() {
       _assert_(db);
       ScopedRWLock lock(&db_->mlock_, true);
       db_->curs_.push_back(this);
@@ -113,6 +113,7 @@ class TextDB : public BasicDB {
       off_ = 0;
       end_ = db_->file_.size();
       queue_.clear();
+      line_.clear();
       if (off_ >= end_) {
         db_->set_error(_KCCODELINE_, Error::NOREC, "no record");
         return false;
@@ -135,6 +136,7 @@ class TextDB : public BasicDB {
       off_ = atoin(kbuf, ksiz);
       end_ = db_->file_.size();
       queue_.clear();
+      line_.clear();
       if (off_ >= end_) {
         db_->set_error(_KCCODELINE_, Error::NOREC, "no record");
         return false;
@@ -243,7 +245,7 @@ class TextDB : public BasicDB {
       bool err = false;
       const Record& rec = queue_.front();
       char kbuf[NUMBUFSIZ];
-      size_t ksiz = std::sprintf(kbuf, "%020lld", (long long)rec.first);
+      size_t ksiz = db_->write_key(kbuf, rec.first);
       size_t vsiz;
       const char* vbuf = visitor->visit_full(kbuf, ksiz,
                                              rec.second.data(), rec.second.size(), &vsiz);
@@ -272,11 +274,10 @@ class TextDB : public BasicDB {
      */
     bool read_next() {
       _assert_(true);
-      std::string line;
       while (off_ < end_) {
         char stack[IOBUFSIZ];
         int64_t rsiz = end_ - off_;
-        if (rsiz > (int64_t)IOBUFSIZ) rsiz = IOBUFSIZ;
+        if (rsiz > (int64_t)sizeof(stack)) rsiz = sizeof(stack);
         if (!db_->file_.read_fast(off_, stack, rsiz)) {
           db_->set_error(_KCCODELINE_, Error::SYSTEM, db_->file_.error());
           return false;
@@ -286,18 +287,19 @@ class TextDB : public BasicDB {
         const char* ep = rp + rsiz;
         while (rp < ep) {
           if (*rp == '\n') {
-            line.append(pv, rp - pv);
+            line_.append(pv, rp - pv);
             Record rec;
             rec.first = off_ + pv - stack;
-            rec.second = line;
+            rec.second = line_;
             queue_.push_back(rec);
-            line.clear();
+            line_.clear();
             rp++;
             pv = rp;
           } else {
             rp++;
           }
         }
+        line_.append(pv, rp - pv);
         off_ += rsiz;
         if (!queue_.empty()) break;
       }
@@ -315,6 +317,8 @@ class TextDB : public BasicDB {
     int64_t end_;
     /** The queue of read lines. */
     std::deque<Record> queue_;
+    /** The current line. */
+    std::string line_;
   };
   /**
    * Default constructor.
@@ -933,10 +937,10 @@ class TextDB : public BasicDB {
     int64_t end = file_.size();
     int64_t curcnt = 0;
     std::string line;
-    char stack[IOBUFSIZ];
+    char stack[IOBUFSIZ*4];
     while (off < end) {
       int64_t rsiz = end - off;
-      if (rsiz > (int64_t)IOBUFSIZ) rsiz = IOBUFSIZ;
+      if (rsiz > (int64_t)sizeof(stack)) rsiz = sizeof(stack);
       if (!file_.read_fast(off, stack, rsiz)) {
         set_error(_KCCODELINE_, Error::SYSTEM, file_.error());
         return false;
@@ -946,11 +950,17 @@ class TextDB : public BasicDB {
       const char* ep = rp + rsiz;
       while (rp < ep) {
         if (*rp == '\n') {
-          line.append(pv, rp - pv);
           char kbuf[NUMBUFSIZ];
-          size_t ksiz = std::sprintf(kbuf, "%020lld", (long long)(off + pv - stack));
+          size_t ksiz = write_key(kbuf, off + pv - stack);
+          const char* vbuf;
           size_t vsiz;
-          const char* vbuf = visitor->visit_full(kbuf, ksiz, line.data(), line.size(), &vsiz);
+          if (line.empty()) {
+            vbuf = visitor->visit_full(kbuf, ksiz, pv, rp - pv, &vsiz);
+          } else {
+            line.append(pv, rp - pv);
+            vbuf = visitor->visit_full(kbuf, ksiz, line.data(), line.size(), &vsiz);
+            line.clear();
+          }
           if (vbuf != Visitor::NOP && vbuf != Visitor::REMOVE) {
             char tstack[IOBUFSIZ];
             size_t trsiz = vsiz + 1;
@@ -969,7 +979,6 @@ class TextDB : public BasicDB {
             set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
             return false;
           }
-          line.clear();
           rp++;
           pv = rp;
         } else {
@@ -1061,10 +1070,10 @@ class TextDB : public BasicDB {
           int64_t off = begoff_;
           int64_t end = endoff_;
           std::string line;
-          char stack[IOBUFSIZ];
+          char stack[IOBUFSIZ*4];
           while (off < end) {
             int64_t rsiz = end - off;
-            if (rsiz > (int64_t)IOBUFSIZ) rsiz = IOBUFSIZ;
+            if (rsiz > (int64_t)sizeof(stack)) rsiz = sizeof(stack);
             if (!file->read_fast(off, stack, rsiz)) {
               db->set_error(_KCCODELINE_, Error::SYSTEM, file->error());
               return;
@@ -1074,30 +1083,21 @@ class TextDB : public BasicDB {
             const char* ep = rp + rsiz;
             while (rp < ep) {
               if (*rp == '\n') {
-                line.append(pv, rp - pv);
                 char kbuf[NUMBUFSIZ];
-                size_t ksiz = std::sprintf(kbuf, "%020lld", (long long)(off + pv - stack));
-                size_t vsiz;
-                const char* vbuf = visitor->visit_full(kbuf, ksiz, line.data(), line.size(),
-                                                       &vsiz);
-                if (vbuf != Visitor::NOP && vbuf != Visitor::REMOVE) {
-                  char tstack[IOBUFSIZ];
-                  size_t trsiz = vsiz + 1;
-                  char* trbuf = trsiz > sizeof(tstack) ? new char[trsiz] : tstack;
-                  std::memcpy(trbuf, vbuf, vsiz);
-                  trbuf[vsiz] = '\n';
-                  if (!file->append(trbuf, trsiz)) {
-                    db->set_error(_KCCODELINE_, Error::SYSTEM, file->error());
-                    if (trbuf != stack) delete[] trbuf;
-                    return;
-                  }
-                  if (trbuf != tstack) delete[] trbuf;
+                size_t ksiz = db->write_key(kbuf, off + pv - stack);
+                if (line.empty()) {
+                  size_t vsiz;
+                  visitor->visit_full(kbuf, ksiz, pv, rp - pv, &vsiz);
+                } else {
+                  line.append(pv, rp - pv);
+                  size_t vsiz;
+                  visitor->visit_full(kbuf, ksiz, line.data(), line.size(), &vsiz);
+                  line.clear();
                 }
                 if (checker && !checker->check("iterate", "processing", -1, -1)) {
                   db->set_error(_KCCODELINE_, Error::LOGIC, "checker failed");
                   return;
                 }
-                line.clear();
                 rp++;
                 pv = rp;
               } else {
@@ -1185,6 +1185,31 @@ class TextDB : public BasicDB {
       cur->off_ = INT64MAX;
       ++cit;
     }
+  }
+  /**
+   * Write the key pattern into a buffer.
+   * @param kbuf the destination buffer.
+   * @param off the offset of the record.
+   * @return the size of the key pattern.
+   */
+  size_t write_key(char* kbuf, int64_t off) {
+    _assert_(kbuf && off >= 0);
+    for (size_t i = 0; i < sizeof(off); i++) {
+      uint8_t c = off >> ((sizeof(off) - 1 - i) * 8);
+      uint8_t h = c >> 4;
+      if (h < 10) {
+        *(kbuf++) = '0' + h;
+      } else {
+        *(kbuf++) = 'A' - 10 + h;
+      }
+      uint8_t l = c & 0xf;
+      if (l < 10) {
+        *(kbuf++) = '0' + l;
+      } else {
+        *(kbuf++) = 'A' - 10 + l;
+      }
+    }
+    return sizeof(off) * 2;
   }
   /** Dummy constructor to forbid the use. */
   TextDB(const TextDB&);

@@ -35,7 +35,7 @@ Dir.glob(pattern) do |path|
         end
         key = face.downcase
         text = text.gsub(/｛[^｝]+｝/, "")
-        text = text.sub(/ *◆([a-z]+:|【URL】|【出展】).*$/, "")
+        text = text.sub(/ *◆([a-z]+:|【URL】|【出典】).*$/, "")
         seq += 1
         printf(outfile, "%s\t%d\t%s\t%s\t%s\n", key, seq, face, part, text)
         printf("%s: %s: %d records done\n", $0, dictname, seq) if seq % 1000 == 0

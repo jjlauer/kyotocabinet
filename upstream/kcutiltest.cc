@@ -2679,7 +2679,7 @@ static int32_t procmisc(int64_t rnum) {
     ebuf = kc::memdup((char*)ubuf, usiz);
     ebuf[usiz] = '\0';
     obuf = kc::strdup(ebuf);
-    switch (myrand(17)) {
+    switch (myrand(18)) {
       case 0: kc::atoi(obuf); break;
       case 1: kc::atoix(obuf); break;
       case 2: kc::atoih(obuf); break;
@@ -2697,6 +2697,7 @@ static int32_t procmisc(int64_t rnum) {
       case 14: kc::strifwm(obuf, ebuf); break;
       case 15: kc::strbwm(obuf, ebuf); break;
       case 16: kc::stribwm(obuf, ebuf); break;
+      case 17: kc::strutflen(obuf); break;
     }
     delete[] obuf;
     delete[] ebuf;

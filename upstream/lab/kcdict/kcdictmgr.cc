@@ -20,6 +20,16 @@
 namespace kc = kyotocabinet;
 
 
+// enumurations
+enum { ZM_DEFAULT, ZM_ZLIB, ZM_LZO, ZM_LZMA };
+
+
+// constants
+const size_t THREADNUM = 8;              // number of threads
+const size_t AMBGRATIO = 3;              // ratio of threshold of ambiguous search
+const size_t AMBGMIN = 3;                // minimum threshold of ambiguous search
+
+
 // global variables
 const char* g_progname;                  // program name
 
@@ -28,12 +38,18 @@ const char* g_progname;                  // program name
 int main(int argc, char** argv);
 static void usage();
 static void dberrprint(kc::BasicDB* db, const char* info);
-static void normalizequery(const std::string& query, std::string* dest);
+static void utftoucs(const char* src, size_t size, uint32_t* dest, size_t* np);
+static void normalizequery(const char* qbuf, size_t qsiz, std::string* dest);
+static void normalizeucs(uint32_t* ary, size_t onum, size_t* np);
+template<class CHARTYPE>
+static size_t levdist(const CHARTYPE* abuf, size_t asiz, const CHARTYPE* bbuf, size_t bsiz);
 static int32_t runimport(int argc, char** argv);
 static int32_t runsearch(int argc, char** argv);
-static int32_t procimport(const char* path, const char* srcpath);
-static int32_t procsearch(const char* path, const char* query, int64_t max,
-                          int32_t mode, bool ts);
+static int32_t runsuggest(int argc, char** argv);
+static int32_t procimport(const char* path, const char* srcpath, int32_t zmode);
+static int32_t procsearch(const char* path, const char* query, int32_t zmode, int64_t max,
+                          int32_t mode, bool ts, bool pk);
+static int32_t procsuggest(const char* path, const char* query, int64_t max, int32_t mode);
 
 
 // structure for sorting indexed records
@@ -49,11 +65,19 @@ struct IndexedRecord {
 
 // structure for sorting ambiguous records
 struct AmbiguousRecord {
-  uint32_t ed;
+  size_t dist;
+  std::string key;
+  uint32_t order;
   std::string text;
   bool operator <(const AmbiguousRecord& right) const {
-    if (ed != right.ed) return ed < right.ed;
-    return text < right.text;
+    if (dist != right.dist) return dist < right.dist;
+    if (key != right.key) return key < right.key;
+    return order < right.order;
+  }
+  bool less(size_t rdist, const std::string& rkey, uint32_t rorder) const {
+    if (dist != rdist) return dist < rdist;
+    if (key != rkey) return key < rkey;
+    return order < rorder;
   }
 };
 
@@ -61,10 +85,15 @@ struct AmbiguousRecord {
 // structure for sorting plain records
 struct PlainRecord {
   std::string key;
+  uint32_t order;
   std::string text;
   bool operator <(const PlainRecord& right) const {
     if (key != right.key) return key < right.key;
-    return text < right.text;
+    return order < right.order;
+  }
+  bool less(const std::string& rkey, uint32_t rorder) const {
+    if (key != rkey) return key < rkey;
+    return order < rorder;
   }
 };
 
@@ -79,6 +108,8 @@ int main(int argc, char** argv) {
     rv = runimport(argc, argv);
   } else if (!std::strcmp(argv[1], "search")) {
     rv = runsearch(argc, argv);
+  } else if (!std::strcmp(argv[1], "suggest")) {
+    rv = runsuggest(argc, argv);
   } else {
     usage();
   }
@@ -90,9 +121,11 @@ int main(int argc, char** argv) {
 static void usage() {
   std::cerr << g_progname << ": the command line utility of the word dictionary" << std::endl;
   std::cerr << std::endl;
-  std::cerr << "  " << g_progname << " import path src" << std::endl;
-  std::cerr << "  " << g_progname << " search [-max num] [-f|-a|-m|-r|-tm|-tr] [-ts] [-iu]"
-      " path query" << std::endl;
+  std::cerr << "  " << g_progname << " import [-cz|-co|-cx] path src" << std::endl;
+  std::cerr << "  " << g_progname << " search [-cz|-co|-cx] [-max num] [-f|-a|-m|-r|-tm|-tr]"
+      " [-ts] [-iu] [-pk] path query" << std::endl;
+  std::cerr << "  " << g_progname << " suggest [-max num] [-m|-r] [-iu] path query" <<
+      std::endl;
   std::cerr << std::endl;
   std::exit(1);
 }
@@ -106,21 +139,84 @@ static void dberrprint(kc::BasicDB* db, const char* info) {
 }
 
 
+// convert a UTF-8 string into a UCS-4 array
+static void utftoucs(const char* src, size_t size, uint32_t* dest, size_t* np) {
+  _assert_(src && dest && np);
+  const unsigned char* rp = (unsigned char*)src;
+  const unsigned char* ep = rp + size;
+  size_t dnum = 0;
+  while (rp < ep) {
+    uint32_t c = *rp;
+    if (c < 0x80) {
+      dest[dnum++] = c;
+    } else if (c < 0xe0) {
+      if (c >= 0xc0 && rp + 1 < ep) {
+        c = ((c & 0x1f) << 6) | (rp[1] & 0x3f);
+        if (c >= 0x80) dest[dnum++] = c;
+        rp++;
+      }
+    } else if (c < 0xf0) {
+      if (rp + 2 < ep) {
+        c = ((c & 0x0f) << 12) | ((rp[1] & 0x3f) << 6) | (rp[2] & 0x3f);
+        if (c >= 0x800) dest[dnum++] = c;
+        rp += 2;
+      }
+    } else if (c < 0xf8) {
+      if (rp + 3 < ep) {
+        c = ((c & 0x07) << 18) | ((rp[1] & 0x3f) << 12) | ((rp[2] & 0x3f) << 6) |
+            (rp[3] & 0x3f);
+        if (c >= 0x10000) dest[dnum++] = c;
+        rp += 3;
+      }
+    } else if (c < 0xfc) {
+      if (rp + 4 < ep) {
+        c = ((c & 0x03) << 24) | ((rp[1] & 0x3f) << 18) | ((rp[2] & 0x3f) << 12) |
+            ((rp[3] & 0x3f) << 6) | (rp[4] & 0x3f);
+        if (c >= 0x200000) dest[dnum++] = c;
+        rp += 4;
+      }
+    } else if (c < 0xfe) {
+      if (rp + 5 < ep) {
+        c = ((c & 0x01) << 30) | ((rp[1] & 0x3f) << 24) | ((rp[2] & 0x3f) << 18) |
+            ((rp[3] & 0x3f) << 12) | ((rp[4] & 0x3f) << 6) | (rp[5] & 0x3f);
+        if (c >= 0x4000000) dest[dnum++] = c;
+        rp += 5;
+      }
+    }
+    rp++;
+  }
+  *np = dnum;
+}
+
+
 // normalize a query
-static void normalizequery(const std::string& query, std::string* dest) {
+static void normalizequery(const char* qbuf, size_t qsiz, std::string* dest) {
+  uint32_t ucsstack[1024];
+  uint32_t* ucs = qsiz > sizeof(ucsstack) / sizeof(*ucsstack) ? new uint32_t[qsiz] : ucsstack;
+  size_t unum;
+  utftoucs(qbuf, qsiz, ucs, &unum);
+  size_t nnum;
+  normalizeucs(ucs, unum, &nnum);
+  qsiz++;
+  char utfstack[2048];
+  char* utf = qsiz > sizeof(utfstack) ? new char[qsiz] : utfstack;
+  qsiz = kc::strucstoutf(ucs, nnum, utf);
+  dest->append(utf, qsiz);
+  if (utf != utfstack) delete[] utf;
+  if (ucs != ucsstack) delete[] ucs;
+}
+
+
+// normalize a USC-4 array
+static void normalizeucs(uint32_t* ary, size_t onum, size_t* np) {
   bool lowmode = true;
   bool nacmode = true;
   bool spcmode = true;
-  size_t rsiz = query.size();
-  uint32_t ucsstack[1024];
-  uint32_t* ucs = rsiz > sizeof(ucsstack) / sizeof(*ucsstack) ? new uint32_t[rsiz] : ucsstack;
-  size_t onum;
-  kc::strutftoucs(query.c_str(), ucs, &onum);
   size_t nnum = 0;
   for (size_t i = 0; i < onum; i++) {
-    uint32_t c = ucs[i];
+    uint32_t c = ary[i];
     if (c >= 0x10000) {
-      ucs[nnum++] = c;
+      ary[nnum++] = c;
       continue;
     }
     uint32_t high = c >> 8;
@@ -128,15 +224,15 @@ static void normalizequery(const std::string& query, std::string* dest) {
       if (c < 0x0020 || c == 0x007f) {
         // control characters
         if (spcmode) {
-          ucs[nnum++] = 0x0020;
+          ary[nnum++] = 0x0020;
         } else if (c == 0x0009 || c == 0x000a || c == 0x000d) {
-          ucs[nnum++] = c;
+          ary[nnum++] = c;
         } else {
-          ucs[nnum++] = 0x0020;
+          ary[nnum++] = 0x0020;
         }
       } else if (c == 0x00a0) {
         // no-break space
-        ucs[nnum++] = 0x0020;
+        ary[nnum++] = 0x0020;
       } else {
         // otherwise
         if (lowmode) {
@@ -187,7 +283,7 @@ static void normalizequery(const std::string& query, std::string* dest) {
             c = 'y';
           }
         }
-        ucs[nnum++] = c;
+        ary[nnum++] = c;
       }
     } else if (high == 0x01) {
       // latin-1 extended
@@ -269,7 +365,7 @@ static void normalizequery(const std::string& query, std::string* dest) {
           c = 's';
         }
       }
-      ucs[nnum++] = c;
+      ary[nnum++] = c;
     } else if (high == 0x03) {
       // greek
       if (lowmode) {
@@ -281,7 +377,7 @@ static void normalizequery(const std::string& query, std::string* dest) {
           c++;
         }
       }
-      ucs[nnum++] = c;
+      ary[nnum++] = c;
     } else if (high == 0x04) {
       // cyrillic
       if (lowmode) {
@@ -301,235 +397,260 @@ static void normalizequery(const std::string& query, std::string* dest) {
           if ((c & 1) == 0) c++;
         }
       }
-      ucs[nnum++] = c;
+      ary[nnum++] = c;
     } else if (high == 0x20) {
       if (c == 0x2002) {
         // en space
-        ucs[nnum++] = 0x0020;
+        ary[nnum++] = 0x0020;
       } else if (c == 0x2003) {
         // em space
-        ucs[nnum++] = 0x0020;
+        ary[nnum++] = 0x0020;
       } else if (c == 0x2009) {
         // thin space
-        ucs[nnum++] = 0x0020;
+        ary[nnum++] = 0x0020;
       } else if (c == 0x2010) {
         // hyphen
-        ucs[nnum++] = 0x002d;
+        ary[nnum++] = 0x002d;
       } else if (c == 0x2015) {
         // fullwidth horizontal line
-        ucs[nnum++] = 0x002d;
+        ary[nnum++] = 0x002d;
       } else if (c == 0x2019) {
         // apostrophe
-        ucs[nnum++] = 0x0027;
+        ary[nnum++] = 0x0027;
       } else if (c == 0x2033) {
         // double quotes
-        ucs[nnum++] = 0x0022;
+        ary[nnum++] = 0x0022;
       } else {
         // (otherwise)
-        ucs[nnum++] = c;
+        ary[nnum++] = c;
       }
     } else if (high == 0x22) {
       if (c == 0x2212) {
         // minus sign
-        ucs[nnum++] = 0x002d;
+        ary[nnum++] = 0x002d;
       } else {
         // (otherwise)
-        ucs[nnum++] = c;
+        ary[nnum++] = c;
       }
     } else if (high == 0x30) {
       if (c == 0x3000) {
         // fullwidth space
         if (spcmode) {
-          ucs[nnum++] = 0x0020;
+          ary[nnum++] = 0x0020;
         } else {
-          ucs[nnum++] = c;
+          ary[nnum++] = c;
         }
       } else {
         // (otherwise)
-        ucs[nnum++] = c;
+        ary[nnum++] = c;
       }
     } else if (high == 0xff) {
       if (c == 0xff01) {
         // fullwidth exclamation
-        ucs[nnum++] = 0x0021;
+        ary[nnum++] = 0x0021;
       } else if (c == 0xff03) {
         // fullwidth igeta
-        ucs[nnum++] = 0x0023;
+        ary[nnum++] = 0x0023;
       } else if (c == 0xff04) {
         // fullwidth dollar
-        ucs[nnum++] = 0x0024;
+        ary[nnum++] = 0x0024;
       } else if (c == 0xff05) {
         // fullwidth parcent
-        ucs[nnum++] = 0x0025;
+        ary[nnum++] = 0x0025;
       } else if (c == 0xff06) {
         // fullwidth ampersand
-        ucs[nnum++] = 0x0026;
+        ary[nnum++] = 0x0026;
       } else if (c == 0xff0a) {
         // fullwidth asterisk
-        ucs[nnum++] = 0x002a;
+        ary[nnum++] = 0x002a;
       } else if (c == 0xff0b) {
         // fullwidth plus
-        ucs[nnum++] = 0x002b;
+        ary[nnum++] = 0x002b;
       } else if (c == 0xff0c) {
         // fullwidth comma
-        ucs[nnum++] = 0x002c;
+        ary[nnum++] = 0x002c;
       } else if (c == 0xff0e) {
         // fullwidth period
-        ucs[nnum++] = 0x002e;
+        ary[nnum++] = 0x002e;
       } else if (c == 0xff0f) {
         // fullwidth slash
-        ucs[nnum++] = 0x002f;
+        ary[nnum++] = 0x002f;
       } else if (c == 0xff1a) {
         // fullwidth colon
-        ucs[nnum++] = 0x003a;
+        ary[nnum++] = 0x003a;
       } else if (c == 0xff1b) {
         // fullwidth semicolon
-        ucs[nnum++] = 0x003b;
+        ary[nnum++] = 0x003b;
       } else if (c == 0xff1d) {
         // fullwidth equal
-        ucs[nnum++] = 0x003d;
+        ary[nnum++] = 0x003d;
       } else if (c == 0xff1f) {
         // fullwidth question
-        ucs[nnum++] = 0x003f;
+        ary[nnum++] = 0x003f;
       } else if (c == 0xff20) {
         // fullwidth atmark
-        ucs[nnum++] = 0x0040;
+        ary[nnum++] = 0x0040;
       } else if (c == 0xff3c) {
         // fullwidth backslash
-        ucs[nnum++] = 0x005c;
+        ary[nnum++] = 0x005c;
       } else if (c == 0xff3e) {
         // fullwidth circumflex
-        ucs[nnum++] = 0x005e;
+        ary[nnum++] = 0x005e;
       } else if (c == 0xff3f) {
         // fullwidth underscore
-        ucs[nnum++] = 0x005f;
+        ary[nnum++] = 0x005f;
       } else if (c == 0xff5c) {
         // fullwidth vertical line
-        ucs[nnum++] = 0x007c;
+        ary[nnum++] = 0x007c;
       } else if (c >= 0xff21 && c <= 0xff3a) {
         // fullwidth alphabets
         if (lowmode) {
           c -= 0xfee0;
           if (c >= 0x0041 && c <= 0x005a) c += 0x20;
-          ucs[nnum++] = c;
+          ary[nnum++] = c;
         } else {
-          ucs[nnum++] = c - 0xfee0;
+          ary[nnum++] = c - 0xfee0;
         }
       } else if (c >= 0xff41 && c <= 0xff5a) {
         // fullwidth small alphabets
-        ucs[nnum++] = c - 0xfee0;
+        ary[nnum++] = c - 0xfee0;
       } else if (c >= 0xff10 && c <= 0xff19) {
         // fullwidth numbers
-        ucs[nnum++] = c - 0xfee0;
+        ary[nnum++] = c - 0xfee0;
       } else if (c == 0xff61) {
         // halfwidth full stop
-        ucs[nnum++] = 0x3002;
+        ary[nnum++] = 0x3002;
       } else if (c == 0xff62) {
         // halfwidth left corner
-        ucs[nnum++] = 0x300c;
+        ary[nnum++] = 0x300c;
       } else if (c == 0xff63) {
         // halfwidth right corner
-        ucs[nnum++] = 0x300d;
+        ary[nnum++] = 0x300d;
       } else if (c == 0xff64) {
         // halfwidth comma
-        ucs[nnum++] = 0x3001;
+        ary[nnum++] = 0x3001;
       } else if (c == 0xff65) {
         // halfwidth middle dot
-        ucs[nnum++] = 0x30fb;
+        ary[nnum++] = 0x30fb;
       } else if (c == 0xff66) {
         // halfwidth wo
-        ucs[nnum++] = 0x30f2;
+        ary[nnum++] = 0x30f2;
       } else if (c >= 0xff67 && c <= 0xff6b) {
         // halfwidth small a-o
-        ucs[nnum++] = (c - 0xff67) * 2 + 0x30a1;
+        ary[nnum++] = (c - 0xff67) * 2 + 0x30a1;
       } else if (c >= 0xff6c && c <= 0xff6e) {
         // halfwidth small ya-yo
-        ucs[nnum++] = (c - 0xff6c) * 2 + 0x30e3;
+        ary[nnum++] = (c - 0xff6c) * 2 + 0x30e3;
       } else if (c == 0xff6f) {
         // halfwidth small tu
-        ucs[nnum++] = 0x30c3;
+        ary[nnum++] = 0x30c3;
       } else if (c == 0xff70) {
         // halfwidth prolonged mark
-        ucs[nnum++] = 0x30fc;
+        ary[nnum++] = 0x30fc;
       } else if (c >= 0xff71 && c <= 0xff75) {
         // halfwidth a-o
         uint32_t tc = (c - 0xff71) * 2 + 0x30a2;
-        if (c == 0xff73 && i < onum - 1 && ucs[i+1] == 0xff9e) {
+        if (c == 0xff73 && i < onum - 1 && ary[i+1] == 0xff9e) {
           tc = 0x30f4;
           i++;
         }
-        ucs[nnum++] = tc;
+        ary[nnum++] = tc;
       } else if (c >= 0xff76 && c <= 0xff7a) {
         // halfwidth ka-ko
         uint32_t tc = (c - 0xff76) * 2 + 0x30ab;
-        if (i < onum - 1 && ucs[i+1] == 0xff9e) {
+        if (i < onum - 1 && ary[i+1] == 0xff9e) {
           tc++;
           i++;
         }
-        ucs[nnum++] = tc;
+        ary[nnum++] = tc;
       } else if (c >= 0xff7b && c <= 0xff7f) {
         // halfwidth sa-so
         uint32_t tc = (c - 0xff7b) * 2 + 0x30b5;
-        if (i < onum - 1 && ucs[i+1] == 0xff9e) {
+        if (i < onum - 1 && ary[i+1] == 0xff9e) {
           tc++;
           i++;
         }
-        ucs[nnum++] = tc;
+        ary[nnum++] = tc;
       } else if (c >= 0xff80 && c <= 0xff84) {
         // halfwidth ta-to
         uint32_t tc = (c - 0xff80) * 2 + 0x30bf + (c >= 0xff82 ? 1 : 0);
-        if (i < onum - 1 && ucs[i+1] == 0xff9e) {
+        if (i < onum - 1 && ary[i+1] == 0xff9e) {
           tc++;
           i++;
         }
-        ucs[nnum++] = tc;
+        ary[nnum++] = tc;
       } else if (c >= 0xff85 && c <= 0xff89) {
         // halfwidth na-no
-        ucs[nnum++] = c - 0xcebb;
+        ary[nnum++] = c - 0xcebb;
       } else if (c >= 0xff8a && c <= 0xff8e) {
         // halfwidth ha-ho
         uint32_t tc = (c - 0xff8a) * 3 + 0x30cf;
         if (i < onum - 1) {
-          if (ucs[i+1] == 0xff9e) {
+          if (ary[i+1] == 0xff9e) {
             tc++;
             i++;
-          } else if (ucs[i+1] == 0xff9f) {
+          } else if (ary[i+1] == 0xff9f) {
             tc += 2;
             i++;
           }
         }
-        ucs[nnum++] = tc;
+        ary[nnum++] = tc;
       } else if (c >= 0xff8f && c <= 0xff93) {
         // halfwidth ma-mo
-        ucs[nnum++] = c - 0xceb1;
+        ary[nnum++] = c - 0xceb1;
       } else if (c >= 0xff94 && c <= 0xff96) {
         // halfwidth ya-yo
-        ucs[nnum++] = (c - 0xff94) * 2 + 0x30e4;
+        ary[nnum++] = (c - 0xff94) * 2 + 0x30e4;
       } else if (c >= 0xff97 && c <= 0xff9b) {
         // halfwidth ra-ro
-        ucs[nnum++] = c - 0xceae;
+        ary[nnum++] = c - 0xceae;
       } else if (c == 0xff9c) {
         // halfwidth wa
-        ucs[nnum++] = 0x30ef;
+        ary[nnum++] = 0x30ef;
       } else if (c == 0xff9d) {
         // halfwidth nn
-        ucs[nnum++] = 0x30f3;
+        ary[nnum++] = 0x30f3;
       } else {
         // otherwise
-        ucs[nnum++] = c;
+        ary[nnum++] = c;
       }
     } else {
       // otherwise
-      ucs[nnum++] = c;
+      ary[nnum++] = c;
     }
   }
-  rsiz = query.size() + 1;
-  char utfstack[2048];
-  char* utf = rsiz > sizeof(utfstack) ? new char[rsiz] : utfstack;
-  rsiz = kc::strucstoutf(ucs, nnum, utf);
-  dest->append(utf, rsiz);
-  if (utf != utfstack) delete[] utf;
-  if (ucs != ucsstack) delete[] ucs;
+  *np = nnum;
+}
+
+
+// get the levenshtein distance of two arrays
+template<class CHARTYPE>
+static size_t levdist(const CHARTYPE* abuf, size_t asiz, const CHARTYPE* bbuf, size_t bsiz) {
+  size_t dsiz = bsiz + 1;
+  size_t tsiz = (asiz + 1) * dsiz;
+  uint8_t tblstack[2048];
+  uint8_t* tbl = tsiz > sizeof(tblstack) ? new uint8_t[tsiz] : tblstack;
+  tbl[0] = 0;
+  for (size_t i = 1; i <= asiz; i++) {
+    tbl[i*dsiz] = i;
+  }
+  for (size_t i = 1; i <= bsiz; i++) {
+    tbl[i] = i;
+  }
+  abuf--;
+  bbuf--;
+  for (size_t i = 1; i <= asiz; i++) {
+    for (size_t j = 1; j <= bsiz; j++) {
+      uint32_t ac = tbl[(i-1)*dsiz+j] + 1;
+      uint32_t bc = tbl[i*dsiz+j-1] + 1;
+      uint32_t cc = tbl[(i-1)*dsiz+j-1] + (abuf[i] != bbuf[j]);
+      ac = ac < bc ? ac : bc;
+      tbl[i*dsiz+j] = ac < cc ? ac : cc;
+    }
+  }
+  size_t ed = tbl[asiz*dsiz+bsiz];
+  if (tbl != tblstack) delete[] tbl;
+  return ed;
 }
 
 
@@ -538,10 +659,17 @@ static int32_t runimport(int argc, char** argv) {
   bool argbrk = false;
   const char* path = NULL;
   const char* srcpath = NULL;
+  int32_t zmode = ZM_DEFAULT;
   for (int32_t i = 2; i < argc; i++) {
     if (!argbrk && argv[i][0] == '-') {
       if (!std::strcmp(argv[i], "--")) {
         argbrk = true;
+      } else if (!std::strcmp(argv[i], "-cz")) {
+        zmode = ZM_ZLIB;
+      } else if (!std::strcmp(argv[i], "-co")) {
+        zmode = ZM_LZO;
+      } else if (!std::strcmp(argv[i], "-cx")) {
+        zmode = ZM_LZMA;
       } else {
         usage();
       }
@@ -555,7 +683,7 @@ static int32_t runimport(int argc, char** argv) {
     }
   }
   if (!path || !srcpath) usage();
-  int32_t rv = procimport(path, srcpath);
+  int32_t rv = procimport(path, srcpath, zmode);
   return rv;
 }
 
@@ -565,14 +693,22 @@ static int32_t runsearch(int argc, char** argv) {
   bool argbrk = false;
   const char* path = NULL;
   const char* query = NULL;
+  int32_t zmode = ZM_DEFAULT;
   int64_t max = 10;
   int32_t mode = 0;
   bool ts = false;
   bool iu = false;
+  bool pk = false;
   for (int32_t i = 2; i < argc; i++) {
     if (!argbrk && argv[i][0] == '-') {
       if (!std::strcmp(argv[i], "--")) {
         argbrk = true;
+      } else if (!std::strcmp(argv[i], "-cz")) {
+        zmode = ZM_ZLIB;
+      } else if (!std::strcmp(argv[i], "-co")) {
+        zmode = ZM_LZO;
+      } else if (!std::strcmp(argv[i], "-cx")) {
+        zmode = ZM_LZMA;
       } else if (!std::strcmp(argv[i], "-max")) {
         if (++i >= argc) usage();
         max = kc::atoix(argv[i]);
@@ -590,6 +726,58 @@ static int32_t runsearch(int argc, char** argv) {
         mode = 'R';
       } else if (!std::strcmp(argv[i], "-ts")) {
         ts = true;
+      } else if (!std::strcmp(argv[i], "-iu")) {
+        iu = true;
+      } else if (!std::strcmp(argv[i], "-pk")) {
+        pk = true;
+      } else {
+        usage();
+      }
+    } else if (!path) {
+      argbrk = true;
+      path = argv[i];
+    } else if (!query) {
+      query = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if (!path || !query) usage();
+  const char* qbuf;
+  if (iu) {
+    size_t qsiz;
+    qbuf = kc::urldecode(query, &qsiz);
+    query = qbuf;
+  } else {
+    qbuf = NULL;
+  }
+  int32_t rv = procsearch(path, query, zmode, max, mode, ts, pk);
+  delete[] qbuf;
+  return rv;
+}
+
+
+// parse arguments of suggest command
+static int32_t runsuggest(int argc, char** argv) {
+  bool argbrk = false;
+  const char* path = NULL;
+  const char* query = NULL;
+  int64_t max = 10;
+  int32_t mode = 0;
+  bool iu = false;
+  for (int32_t i = 2; i < argc; i++) {
+    if (!argbrk && argv[i][0] == '-') {
+      if (!std::strcmp(argv[i], "--")) {
+        argbrk = true;
+      } else if (!std::strcmp(argv[i], "-max")) {
+        if (++i >= argc) usage();
+        max = kc::atoix(argv[i]);
+      } else if (!std::strcmp(argv[i], "-f")) {
+        mode = 'f';
+      } else if (!std::strcmp(argv[i], "-m")) {
+        mode = 'm';
+      } else if (!std::strcmp(argv[i], "-r")) {
+        mode = 'r';
       } else if (!std::strcmp(argv[i], "-iu")) {
         iu = true;
       } else {
@@ -613,23 +801,40 @@ static int32_t runsearch(int argc, char** argv) {
   } else {
     qbuf = NULL;
   }
-  int32_t rv = procsearch(path, query, max, mode, ts);
+  int32_t rv = procsuggest(path, query, max, mode);
   delete[] qbuf;
   return rv;
 }
 
 
 // perform import command
-static int32_t procimport(const char* path, const char* srcpath) {
+static int32_t procimport(const char* path, const char* srcpath, int32_t zmode) {
   kc::TextDB srcdb;
   if (!srcdb.open(srcpath, kc::TextDB::OREADER)) {
     dberrprint(&srcdb, "DB::open failed");
     return 1;
   }
   kc::TreeDB destdb;
-  destdb.tune_options(kc::TreeDB::TSMALL | kc::TreeDB::TLINEAR | kc::TreeDB::TCOMPRESS);
+  int32_t opts = kc::TreeDB::TSMALL | kc::TreeDB::TLINEAR;
+  kc::Compressor* zcomp = NULL;
+  if (zmode != ZM_DEFAULT) {
+    opts |= kc::TreeDB::TCOMPRESS;
+    switch (zmode) {
+      case ZM_LZO: {
+        zcomp = new kc::LZOCompressor<kc::LZO::RAW>;
+        break;
+      }
+      case ZM_LZMA: {
+        zcomp = new kc::LZMACompressor<kc::LZMA::RAW>;
+        break;
+      }
+    }
+  }
+  destdb.tune_options(opts);
+  if (zcomp) destdb.tune_compressor(zcomp);
   if (!destdb.open(path, kc::TreeDB::OWRITER | kc::TreeDB::OCREATE | kc::TreeDB::OTRUNCATE)) {
     dberrprint(&destdb, "DB::open failed");
+    delete zcomp;
     return 1;
   }
   bool err = false;
@@ -647,7 +852,7 @@ static int32_t procimport(const char* path, const char* srcpath) {
       kc::strsplit(std::string(vbuf, vsiz), '\t', &fields);
       if (fields.size() >= 5) {
         std::string key;
-        normalizequery(fields[0], &key);
+        normalizequery(fields[0].data(), fields[0].size(), &key);
         std::string value;
         kc::strprintf(&value, "%s\t%s\t%s\t%s",
                       fields[1].c_str(), fields[2].c_str(),
@@ -712,6 +917,7 @@ static int32_t procimport(const char* path, const char* srcpath) {
     kc::AtomicInt64 redcnt_;
   };
   MapReduceImpl mr(&destdb);
+  mr.tune_thread(THREADNUM, THREADNUM, THREADNUM);
   if (!mr.execute(&srcdb, "", kc::MapReduce::XPARAMAP | kc::MapReduce::XPARAFLS)) {
     dberrprint(&srcdb, "MapReduce::execute failed");
     err = true;
@@ -724,6 +930,7 @@ static int32_t procimport(const char* path, const char* srcpath) {
     dberrprint(&destdb, "DB::close failed");
     err = true;
   }
+  delete zcomp;
   if (!srcdb.close()) {
     dberrprint(&srcdb, "DB::close failed");
     err = true;
@@ -733,11 +940,26 @@ static int32_t procimport(const char* path, const char* srcpath) {
 
 
 // perform search command
-static int32_t procsearch(const char* path, const char* query, int64_t max,
-                          int32_t mode, bool ts) {
+static int32_t procsearch(const char* path, const char* query, int32_t zmode, int64_t max,
+                          int32_t mode, bool ts, bool pk) {
   kc::TreeDB db;
+  kc::Compressor* zcomp = NULL;
+  if (zmode != ZM_DEFAULT) {
+    switch (zmode) {
+      case ZM_LZO: {
+        zcomp = new kc::LZOCompressor<kc::LZO::RAW>;
+        break;
+      }
+      case ZM_LZMA: {
+        zcomp = new kc::LZMACompressor<kc::LZMA::RAW>;
+        break;
+      }
+    }
+  }
+  if (zcomp) db.tune_compressor(zcomp);
   if (!db.open(path, kc::TreeDB::OREADER)) {
     dberrprint(&db, "DB::open failed");
+    delete zcomp;
     return 1;
   }
   std::string nquery;
@@ -745,64 +967,63 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
     nquery = query;
     kc::strtolower(&nquery);
   } else {
-    normalizequery(query, &nquery);
+    normalizequery(query, std::strlen(query), &nquery);
   }
   bool err = false;
   if (mode == 'a') {
     class VisitorImpl : public kc::DB::Visitor {
      public:
-      VisitorImpl(const std::string& query, int64_t max) :
-          qbuf_(query.data()), qsiz_(query.size()), max_(max), thres_(0), lock_(), queue_() {
+      VisitorImpl(const std::string& query, int64_t max, bool pk) :
+          qbuf_(), qsiz_(0), max_(max), pk_(pk),
+          thres_(0), minsiz_(0), maxsiz_(0), lock_(), queue_() {
+        qsiz_ = query.size();
+        qbuf_ = new uint32_t[qsiz_+1];
+        utftoucs(query.data(), query.size(), qbuf_, &qsiz_);
         if (qsiz_ > kc::UINT8MAX) qsiz_ = kc::UINT8MAX;
-        thres_ = qsiz_ / 3;
-        if (thres_ < 3) thres_ = 3;
+        thres_ = qsiz_ / AMBGRATIO;
+        if (thres_ < AMBGMIN) thres_ = AMBGMIN;
+        minsiz_ = qsiz_ > thres_ ? qsiz_ - thres_ : 0;
+        maxsiz_ = qsiz_ + thres_;
+      }
+      ~VisitorImpl() {
+        delete[] qbuf_;
       }
      private:
       const char* visit_full(const char* kbuf, size_t ksiz,
                              const char* vbuf, size_t vsiz, size_t* sp) {
-        if (ksiz < 1) return NOP;
-        ksiz--;
-        while (ksiz > 0 && kbuf[ksiz] != '\t') {
+        size_t oksiz = ksiz;
+        while (ksiz > 0 && kbuf[ksiz-1] != '\t') {
           ksiz--;
         }
-        if (ksiz > kc::UINT8MAX) ksiz = kc::UINT8MAX;
-        const char* qbuf = qbuf_;
-        size_t qsiz = qsiz_;
-        size_t dsiz = qsiz + 1;
-        uint8_t* tbl = new uint8_t[(ksiz+1)*dsiz];
-        for (size_t i = 0; i <= ksiz; i++) {
-          tbl[i*dsiz] = i;
+        if (ksiz > 0 && kbuf[ksiz-1] == '\t') ksiz--;
+        uint32_t ucsstack[kc::UINT8MAX];
+        uint32_t* ucs = ksiz > sizeof(ucsstack) / sizeof(*ucsstack) ?
+            new uint32_t[ksiz] : ucsstack;
+        size_t usiz;
+        utftoucs(kbuf, ksiz, ucs, &usiz);
+        if (usiz > kc::UINT8MAX) usiz = kc::UINT8MAX;
+        if (usiz < minsiz_ || usiz > maxsiz_) {
+          if (ucs != ucsstack) delete[] ucs;
+          return NOP;
         }
-        for (size_t i = 1; i <= qsiz; i++) {
-          tbl[i] = i;
-        }
-        kbuf--;
-        qbuf--;
-        for (size_t i = 1; i <= ksiz; i++) {
-          for (size_t j = 1; j <= qsiz; j++) {
-            uint32_t ac = tbl[(i-1)*dsiz+j] + 1;
-            uint32_t bc = tbl[i*dsiz+j-1] + 1;
-            uint32_t cc = tbl[(i-1)*dsiz+j-1] + (kbuf[i] != qbuf[j]);
-            ac = ac < bc ? ac : bc;
-            tbl[i*dsiz+j] = ac < cc ? ac : cc;
-          }
-        }
-        uint32_t ed = tbl[ksiz*dsiz+qsiz];
-        delete[] tbl;
-        if (ed <= thres_) {
+        size_t dist = levdist(ucs, usiz, qbuf_, qsiz_);
+        if (dist <= thres_) {
+          std::string key(kbuf, ksiz);
+          uint32_t order = kc::atoin(kbuf + ksiz, oksiz - ksiz);
           kc::ScopedMutex lock(&lock_);
           if ((int64_t)queue_.size() < max_) {
-            AmbiguousRecord rec = { ed, std::string(vbuf, vsiz) };
+            AmbiguousRecord rec = { dist, key, order, std::string(vbuf, vsiz) };
             queue_.push(rec);
           } else {
             const AmbiguousRecord& top = queue_.top();
-            if (ed < top.ed) {
+            if (!top.less(dist, key, order)) {
               queue_.pop();
-              AmbiguousRecord rec = { ed, std::string(vbuf, vsiz) };
+              AmbiguousRecord rec = { dist, key, order, std::string(vbuf, vsiz) };
               queue_.push(rec);
             }
           }
         }
+        if (ucs != ucsstack) delete[] ucs;
         return NOP;
       }
       void visit_after() {
@@ -814,46 +1035,51 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
         std::vector<AmbiguousRecord>::reverse_iterator rit = recs.rbegin();
         std::vector<AmbiguousRecord>::reverse_iterator ritend = recs.rend();
         while (rit != ritend) {
-          std::cout << rit->text << "\t" << rit->ed << std::endl;
+          if (pk_) std::cout << rit->key << "\t";
+          std::cout << rit->text << "\t" << rit->dist << std::endl;
           ++rit;
         }
       }
-      const char* qbuf_;
+      uint32_t* qbuf_;
       size_t qsiz_;
       int64_t max_;
-      uint32_t thres_;
+      bool pk_;
+      size_t thres_;
+      size_t minsiz_;
+      size_t maxsiz_;
       kc::Mutex lock_;
       std::priority_queue<AmbiguousRecord> queue_;
     };
-    VisitorImpl visitor(nquery, max);
-    if (!db.scan_parallel(&visitor, 8)) {
-      dberrprint(&db, "DB::close failed");
+    VisitorImpl visitor(nquery, max, pk);
+    if (!db.scan_parallel(&visitor, THREADNUM)) {
+      dberrprint(&db, "DB::scan_parallel faileda");
       err = true;
     }
   } else if (mode == 'm') {
     class VisitorImpl : public kc::DB::Visitor {
      public:
-      VisitorImpl(const std::string& query, int64_t max) :
-          query_(query), max_(max), lock_(), queue_() {}
+      VisitorImpl(const std::string& query, int64_t max, bool pk) :
+          query_(query), max_(max), pk_(pk), lock_(), queue_() {}
      private:
       const char* visit_full(const char* kbuf, size_t ksiz,
                              const char* vbuf, size_t vsiz, size_t* sp) {
-        if (ksiz < 1) return NOP;
-        ksiz--;
-        while (ksiz > 0 && kbuf[ksiz] != '\t') {
+        size_t oksiz = ksiz;
+        while (ksiz > 0 && kbuf[ksiz-1] != '\t') {
           ksiz--;
         }
+        if (ksiz > 0 && kbuf[ksiz-1] == '\t') ksiz--;
         std::string key(kbuf, ksiz);
         if (key.find(query_) != std::string::npos) {
+          uint32_t order = kc::atoin(kbuf + ksiz, oksiz - ksiz);
           kc::ScopedMutex lock(&lock_);
           if ((int64_t)queue_.size() < max_) {
-            PlainRecord rec = { key, std::string(vbuf, vsiz) };
+            PlainRecord rec = { key, order, std::string(vbuf, vsiz) };
             queue_.push(rec);
           } else {
             const PlainRecord& top = queue_.top();
-            if (key < top.key) {
+            if (!top.less(key, order)) {
               queue_.pop();
-              PlainRecord rec = { key, std::string(vbuf, vsiz) };
+              PlainRecord rec = { key, order, std::string(vbuf, vsiz) };
               queue_.push(rec);
             }
           }
@@ -869,29 +1095,30 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
         std::vector<PlainRecord>::reverse_iterator rit = recs.rbegin();
         std::vector<PlainRecord>::reverse_iterator ritend = recs.rend();
         while (rit != ritend) {
+          if (pk_) std::cout << rit->key << "\t";
           std::cout << rit->text << std::endl;
           ++rit;
         }
       }
       std::string query_;
       int64_t max_;
+      bool pk_;
       kc::Mutex lock_;
       std::priority_queue<PlainRecord> queue_;
     };
-    VisitorImpl visitor(nquery, max);
-    if (!db.scan_parallel(&visitor, 8)) {
-      dberrprint(&db, "DB::close failed");
+    VisitorImpl visitor(nquery, max, pk);
+    if (!db.scan_parallel(&visitor, THREADNUM)) {
+      dberrprint(&db, "DB::scan_parallel failed");
       err = true;
     }
   } else if (mode == 'M') {
     class VisitorImpl : public kc::DB::Visitor {
      public:
-      VisitorImpl(const std::string& query, int64_t max, bool ts) :
-          query_(query), max_(max), ts_(ts), lock_(), queue_() {}
+      VisitorImpl(const std::string& query, int64_t max, bool ts, bool pk) :
+          query_(query), max_(max), ts_(ts), pk_(pk), lock_(), queue_() {}
      private:
       const char* visit_full(const char* kbuf, size_t ksiz,
                              const char* vbuf, size_t vsiz, size_t* sp) {
-        if (ksiz < 1) return NOP;
         const char* rbuf = vbuf;
         size_t rsiz = vsiz;
         while (rsiz > 0 && *rbuf != '\t') {
@@ -915,24 +1142,26 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
           hit = kc::memimem(rbuf, rsiz, query_.data(), query_.size()) != NULL;
         } else {
           std::string value;
-          normalizequery(std::string(rbuf, rsiz), &value);
+          normalizequery(rbuf, rsiz, &value);
           hit = value.find(query_) != std::string::npos;
         }
         if (hit) {
-          ksiz--;
-          while (ksiz > 0 && kbuf[ksiz] != '\t') {
+          size_t oksiz = ksiz;
+          while (ksiz > 0 && kbuf[ksiz-1] != '\t') {
             ksiz--;
           }
+          if (ksiz > 0 && kbuf[ksiz-1] == '\t') ksiz--;
           std::string key(kbuf, ksiz);
+          uint32_t order = kc::atoin(kbuf + ksiz, oksiz - ksiz);
           kc::ScopedMutex lock(&lock_);
           if ((int64_t)queue_.size() < max_) {
-            PlainRecord rec = { key, std::string(vbuf, vsiz) };
+            PlainRecord rec = { key, order, std::string(vbuf, vsiz) };
             queue_.push(rec);
           } else {
             const PlainRecord& top = queue_.top();
-            if (key < top.key) {
+            if (!top.less(key, order)) {
               queue_.pop();
-              PlainRecord rec = { key, std::string(vbuf, vsiz) };
+              PlainRecord rec = { key, order, std::string(vbuf, vsiz) };
               queue_.push(rec);
             }
           }
@@ -948,6 +1177,7 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
         std::vector<PlainRecord>::reverse_iterator rit = recs.rbegin();
         std::vector<PlainRecord>::reverse_iterator ritend = recs.rend();
         while (rit != ritend) {
+          if (pk_) std::cout << rit->key << "\t";
           std::cout << rit->text << std::endl;
           ++rit;
         }
@@ -955,40 +1185,42 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
       std::string query_;
       int64_t max_;
       bool ts_;
+      bool pk_;
       kc::Mutex lock_;
       std::priority_queue<PlainRecord> queue_;
     };
-    VisitorImpl visitor(nquery, max, ts);
-    if (!db.scan_parallel(&visitor, 8)) {
-      dberrprint(&db, "DB::close failed");
+    VisitorImpl visitor(nquery, max, ts, pk);
+    if (!db.scan_parallel(&visitor, THREADNUM)) {
+      dberrprint(&db, "DB::scan_parallel failed");
       err = true;
     }
   } else if (mode == 'r') {
     class VisitorImpl : public kc::DB::Visitor {
      public:
-      VisitorImpl(const std::string& query, int64_t max) :
-          regex_(), max_(max), lock_(), queue_() {
+      VisitorImpl(const std::string& query, int64_t max, bool pk) :
+          regex_(), max_(max), pk_(pk), lock_(), queue_() {
         regex_.compile(query, kc::Regex::MATCHONLY);
       }
      private:
       const char* visit_full(const char* kbuf, size_t ksiz,
                              const char* vbuf, size_t vsiz, size_t* sp) {
-        if (ksiz < 1) return NOP;
-        ksiz--;
-        while (ksiz > 0 && kbuf[ksiz] != '\t') {
+        size_t oksiz = ksiz;
+        while (ksiz > 0 && kbuf[ksiz-1] != '\t') {
           ksiz--;
         }
+        if (ksiz > 0 && kbuf[ksiz-1] == '\t') ksiz--;
         std::string key(kbuf, ksiz);
         if (regex_.match(key)) {
+          uint32_t order = kc::atoin(kbuf + ksiz, oksiz - ksiz);
           kc::ScopedMutex lock(&lock_);
           if ((int64_t)queue_.size() < max_) {
-            PlainRecord rec = { key, std::string(vbuf, vsiz) };
+            PlainRecord rec = { key, order, std::string(vbuf, vsiz) };
             queue_.push(rec);
           } else {
             const PlainRecord& top = queue_.top();
-            if (key < top.key) {
+            if (!top.less(key, order)) {
               queue_.pop();
-              PlainRecord rec = { key, std::string(vbuf, vsiz) };
+              PlainRecord rec = { key, order, std::string(vbuf, vsiz) };
               queue_.push(rec);
             }
           }
@@ -1004,31 +1236,32 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
         std::vector<PlainRecord>::reverse_iterator rit = recs.rbegin();
         std::vector<PlainRecord>::reverse_iterator ritend = recs.rend();
         while (rit != ritend) {
+          if (pk_) std::cout << rit->key << "\t";
           std::cout << rit->text << std::endl;
           ++rit;
         }
       }
       kc::Regex regex_;
       int64_t max_;
+      bool pk_;
       kc::Mutex lock_;
       std::priority_queue<PlainRecord> queue_;
     };
-    VisitorImpl visitor(nquery, max);
-    if (!db.scan_parallel(&visitor, 8)) {
-      dberrprint(&db, "DB::close failed");
+    VisitorImpl visitor(nquery, max, pk);
+    if (!db.scan_parallel(&visitor, THREADNUM)) {
+      dberrprint(&db, "DB::scan_parallel failed");
       err = true;
     }
   } else if (mode == 'R') {
     class VisitorImpl : public kc::DB::Visitor {
      public:
-      VisitorImpl(const std::string& query, int64_t max, bool ts) :
-          regex_(), max_(max), ts_(ts), lock_(), queue_() {
+      VisitorImpl(const std::string& query, int64_t max, bool ts, bool pk) :
+          regex_(), max_(max), ts_(ts), pk_(pk), lock_(), queue_() {
         regex_.compile(query, kc::Regex::MATCHONLY);
       }
      private:
       const char* visit_full(const char* kbuf, size_t ksiz,
                              const char* vbuf, size_t vsiz, size_t* sp) {
-        if (ksiz < 1) return NOP;
         const char* rbuf = vbuf;
         size_t rsiz = vsiz;
         while (rsiz > 0 && *rbuf != '\t') {
@@ -1054,24 +1287,26 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
           hit = regex_.match(value);
         } else {
           std::string value(rbuf, rsiz);
-          normalizequery(std::string(rbuf, rsiz), &value);
+          normalizequery(rbuf, rsiz, &value);
           hit = regex_.match(value);
         }
         if (hit) {
-          ksiz--;
-          while (ksiz > 0 && kbuf[ksiz] != '\t') {
+          size_t oksiz = ksiz;
+          while (ksiz > 0 && kbuf[ksiz-1] != '\t') {
             ksiz--;
           }
+          if (ksiz > 0 && kbuf[ksiz-1] == '\t') ksiz--;
           std::string key(kbuf, ksiz);
+          uint32_t order = kc::atoin(kbuf + ksiz, oksiz - ksiz);
           kc::ScopedMutex lock(&lock_);
           if ((int64_t)queue_.size() < max_) {
-            PlainRecord rec = { key, std::string(vbuf, vsiz) };
+            PlainRecord rec = { key, order, std::string(vbuf, vsiz) };
             queue_.push(rec);
           } else {
             const PlainRecord& top = queue_.top();
-            if (key < top.key) {
+            if (!top.less(key, order)) {
               queue_.pop();
-              PlainRecord rec = { key, std::string(vbuf, vsiz) };
+              PlainRecord rec = { key, order, std::string(vbuf, vsiz) };
               queue_.push(rec);
             }
           }
@@ -1087,6 +1322,7 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
         std::vector<PlainRecord>::reverse_iterator rit = recs.rbegin();
         std::vector<PlainRecord>::reverse_iterator ritend = recs.rend();
         while (rit != ritend) {
+          if (pk_) std::cout << rit->key << "\t";
           std::cout << rit->text << std::endl;
           ++rit;
         }
@@ -1094,12 +1330,13 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
       kc::Regex regex_;
       int64_t max_;
       bool ts_;
+      bool pk_;
       kc::Mutex lock_;
       std::priority_queue<PlainRecord> queue_;
     };
-    VisitorImpl visitor(nquery, max, ts);
-    if (!db.scan_parallel(&visitor, 8)) {
-      dberrprint(&db, "DB::close failed");
+    VisitorImpl visitor(nquery, max, ts, pk);
+    if (!db.scan_parallel(&visitor, THREADNUM)) {
+      dberrprint(&db, "DB::scan_parallel failed");
       err = true;
     }
   } else {
@@ -1113,6 +1350,14 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
     size_t vsiz;
     while (max > 0 && (kbuf = cur->get(&ksiz, &vbuf, &vsiz, true)) != NULL) {
       if (ksiz >= qstr.size() && !std::memcmp(kbuf, qstr.data(), qstr.size())) {
+        if (pk) {
+          while (ksiz > 0 && kbuf[ksiz-1] != '\t') {
+            ksiz--;
+          }
+          if (ksiz > 0 && kbuf[ksiz-1] == '\t') ksiz--;
+          std::cout.write(kbuf, ksiz);
+          std::cout << "\t";
+        }
         std::cout.write(vbuf, vsiz);
         std::cout << std::endl;
       } else {
@@ -1122,6 +1367,201 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
       max--;
     }
     delete cur;
+  }
+  if (!db.close()) {
+    dberrprint(&db, "DB::close failed");
+    err = true;
+  }
+  delete zcomp;
+  return err ? 1 : 0;
+}
+
+
+// perform suggest command
+static int32_t procsuggest(const char* path, const char* query, int64_t max, int32_t mode) {
+  kc::TextDB db;
+  if (!db.open(path, kc::TextDB::OREADER)) {
+    dberrprint(&db, "DB::open failed");
+    return 1;
+  }
+  std::string nquery;
+  normalizequery(query, std::strlen(query), &nquery);
+  bool err = false;
+  if (mode == 'm') {
+    class VisitorImpl : public kc::DB::Visitor {
+     public:
+      VisitorImpl(const std::string& query, int64_t max) :
+          query_(query), max_(max), lock_(), queue_() {}
+     private:
+      const char* visit_full(const char* kbuf, size_t ksiz,
+                             const char* vbuf, size_t vsiz, size_t* sp) {
+        std::string key(vbuf, vsiz);
+        if (key.find(query_) != std::string::npos) {
+          kc::ScopedMutex lock(&lock_);
+          if ((int64_t)queue_.size() < max_) {
+            PlainRecord rec = { key, 0, "" };
+            queue_.push(rec);
+          } else {
+            const PlainRecord& top = queue_.top();
+            if (!top.less(key, 0)) {
+              queue_.pop();
+              PlainRecord rec = { key, 0, "" };
+              queue_.push(rec);
+            }
+          }
+        }
+        return NOP;
+      }
+      void visit_after() {
+        std::vector<PlainRecord> recs;
+        while (!queue_.empty()) {
+          recs.push_back(queue_.top());
+          queue_.pop();
+        }
+        std::vector<PlainRecord>::reverse_iterator rit = recs.rbegin();
+        std::vector<PlainRecord>::reverse_iterator ritend = recs.rend();
+        while (rit != ritend) {
+          std::cout << rit->key << std::endl;
+          ++rit;
+        }
+      }
+      std::string query_;
+      int64_t max_;
+      kc::Mutex lock_;
+      std::priority_queue<PlainRecord> queue_;
+    };
+    VisitorImpl visitor(nquery, max);
+    if (!db.scan_parallel(&visitor, THREADNUM)) {
+      dberrprint(&db, "DB::scan_parallel failed");
+      err = true;
+    }
+  } else if (mode == 'r') {
+    class VisitorImpl : public kc::DB::Visitor {
+     public:
+      VisitorImpl(const std::string& query, int64_t max) :
+          regex_(), max_(max), lock_(), queue_() {
+        regex_.compile(query, kc::Regex::MATCHONLY);
+      }
+     private:
+      const char* visit_full(const char* kbuf, size_t ksiz,
+                             const char* vbuf, size_t vsiz, size_t* sp) {
+        std::string key(vbuf, vsiz);
+        if (regex_.match(key)) {
+          kc::ScopedMutex lock(&lock_);
+          if ((int64_t)queue_.size() < max_) {
+            PlainRecord rec = { key, 0, "" };
+            queue_.push(rec);
+          } else {
+            const PlainRecord& top = queue_.top();
+            if (!top.less(key, 0)) {
+              queue_.pop();
+              PlainRecord rec = { key, 0, "" };
+              queue_.push(rec);
+            }
+          }
+        }
+        return NOP;
+      }
+      void visit_after() {
+        std::vector<PlainRecord> recs;
+        while (!queue_.empty()) {
+          recs.push_back(queue_.top());
+          queue_.pop();
+        }
+        std::vector<PlainRecord>::reverse_iterator rit = recs.rbegin();
+        std::vector<PlainRecord>::reverse_iterator ritend = recs.rend();
+        while (rit != ritend) {
+          std::cout << rit->key << std::endl;
+          ++rit;
+        }
+      }
+      kc::Regex regex_;
+      int64_t max_;
+      kc::Mutex lock_;
+      std::priority_queue<PlainRecord> queue_;
+    };
+    VisitorImpl visitor(nquery, max);
+    if (!db.scan_parallel(&visitor, THREADNUM)) {
+      dberrprint(&db, "DB::scan_parallel failed");
+      err = true;
+    }
+  } else {
+    class VisitorImpl : public kc::DB::Visitor {
+     public:
+      VisitorImpl(const std::string& query, int64_t max) :
+          qbuf_(), qsiz_(0), max_(max),
+          thres_(0), minsiz_(0), maxsiz_(0), lock_(), queue_() {
+        qsiz_ = query.size();
+        qbuf_ = new uint32_t[qsiz_+1];
+        utftoucs(query.data(), query.size(), qbuf_, &qsiz_);
+        if (qsiz_ > kc::UINT8MAX) qsiz_ = kc::UINT8MAX;
+        thres_ = qsiz_ / AMBGRATIO;
+        if (thres_ < AMBGMIN) thres_ = AMBGMIN;
+        minsiz_ = qsiz_ > thres_ ? qsiz_ - thres_ : 0;
+        maxsiz_ = qsiz_ + thres_;
+      }
+      ~VisitorImpl() {
+        delete[] qbuf_;
+      }
+     private:
+      const char* visit_full(const char* kbuf, size_t ksiz,
+                             const char* vbuf, size_t vsiz, size_t* sp) {
+        uint32_t ucsstack[kc::UINT8MAX];
+        uint32_t* ucs = vsiz > sizeof(ucsstack) / sizeof(*ucsstack) ?
+            new uint32_t[vsiz] : ucsstack;
+        size_t usiz;
+        utftoucs(vbuf, vsiz, ucs, &usiz);
+        if (usiz > kc::UINT8MAX) usiz = kc::UINT8MAX;
+        if (usiz < minsiz_ || usiz > maxsiz_) {
+          if (ucs != ucsstack) delete[] ucs;
+          return NOP;
+        }
+        size_t dist = levdist(ucs, usiz, qbuf_, qsiz_);
+        if (dist <= thres_) {
+          std::string key(vbuf, vsiz);
+          kc::ScopedMutex lock(&lock_);
+          if ((int64_t)queue_.size() < max_) {
+            AmbiguousRecord rec = { dist, key, 0, "" };
+            queue_.push(rec);
+          } else {
+            const AmbiguousRecord& top = queue_.top();
+            if (!top.less(dist, key, 0)) {
+              queue_.pop();
+              AmbiguousRecord rec = { dist, key, 0, "" };
+              queue_.push(rec);
+            }
+          }
+        }
+        if (ucs != ucsstack) delete[] ucs;
+        return NOP;
+      }
+      void visit_after() {
+        std::vector<AmbiguousRecord> recs;
+        while (!queue_.empty()) {
+          recs.push_back(queue_.top());
+          queue_.pop();
+        }
+        std::vector<AmbiguousRecord>::reverse_iterator rit = recs.rbegin();
+        std::vector<AmbiguousRecord>::reverse_iterator ritend = recs.rend();
+        while (rit != ritend) {
+          std::cout << rit->key << "\t" << rit->dist << std::endl;
+          ++rit;
+        }
+      }
+      uint32_t* qbuf_;
+      size_t qsiz_;
+      int64_t max_;
+      size_t thres_;
+      size_t minsiz_;
+      size_t maxsiz_;
+      kc::Mutex lock_;
+      std::priority_queue<AmbiguousRecord> queue_;
+    };
+    VisitorImpl visitor(nquery, max);
+    if (!db.scan_parallel(&visitor, THREADNUM)) {
+      dberrprint(&db, "DB::scan_parallel faileda");
+      err = true;
+    }
   }
   if (!db.close()) {
     dberrprint(&db, "DB::close failed");
