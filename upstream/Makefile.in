@@ -207,6 +207,7 @@ check-util :
 	$(RUNENV) $(RUNCMD) ./kcutilmgr conf
 	rm -rf casket*
 	$(RUNENV) $(RUNCMD) ./kcutiltest mutex -th 4 -iv -1 10000
+	$(RUNENV) $(RUNCMD) ./kcutiltest cond -th 4 -iv -1 10000
 	$(RUNENV) $(RUNCMD) ./kcutiltest para -th 4 10000
 	$(RUNENV) $(RUNCMD) ./kcutiltest para -th 4 -iv -1 10000
 	$(RUNENV) $(RUNCMD) ./kcutiltest file -th 4 casket 10000

@@ -34,6 +34,7 @@ static void errprint(int32_t line, const char* format, ...);
 static void fileerrprint(kc::File* file, int32_t line, const char* func);
 static void filemetaprint(kc::File* file);
 static int32_t runmutex(int argc, char** argv);
+static int32_t runcond(int argc, char** argv);
 static int32_t runpara(int argc, char** argv);
 static int32_t runfile(int argc, char** argv);
 static int32_t runlhmap(int argc, char** argv);
@@ -41,6 +42,7 @@ static int32_t runthmap(int argc, char** argv);
 static int32_t runtalist(int argc, char** argv);
 static int32_t runmisc(int argc, char** argv);
 static int32_t procmutex(int64_t rnum, int32_t thnum, double iv);
+static int32_t proccond(int64_t rnum, int32_t thnum, double iv);
 static int32_t procpara(int64_t rnum, int32_t thnum, double iv);
 static int32_t procfile(const char* path, int64_t rnum, int32_t thnum, bool rnd, int64_t msiz);
 static int32_t proclhmap(int64_t rnum, bool rnd, int64_t bnum);
@@ -61,6 +63,8 @@ int main(int argc, char** argv) {
   int32_t rv = 0;
   if (!std::strcmp(argv[1], "mutex")) {
     rv = runmutex(argc, argv);
+  } else if (!std::strcmp(argv[1], "cond")) {
+    rv = runcond(argc, argv);
   } else if (!std::strcmp(argv[1], "para")) {
     rv = runpara(argc, argv);
   } else if (!std::strcmp(argv[1], "file")) {
@@ -94,6 +98,7 @@ static void usage() {
   eprintf("usage:\n");
   eprintf("  %s mutex [-th num] [-iv num] rnum\n", g_progname);
   eprintf("  %s para [-th num] [-iv num] rnum\n", g_progname);
+  eprintf("  %s cond [-th num] [-iv num] rnum\n", g_progname);
   eprintf("  %s file [-th num] [-rnd] [-msiz num] path rnum\n", g_progname);
   eprintf("  %s lhmap [-rnd] [-bnum num] rnum\n", g_progname);
   eprintf("  %s thmap [-rnd] [-bnum num] rnum\n", g_progname);
@@ -161,6 +166,41 @@ static int32_t runmutex(int argc, char** argv) {
   if (rnum < 1 || thnum < 1) usage();
   if (thnum > THREADMAX) thnum = THREADMAX;
   int32_t rv = procmutex(rnum, thnum, iv);
+  return rv;
+}
+
+
+// parse arguments of cond command
+static int32_t runcond(int argc, char** argv) {
+  bool argbrk = false;
+  const char* rstr = NULL;
+  int32_t thnum = 1;
+  double iv = 0.0;
+  for (int32_t i = 2; i < argc; i++) {
+    if (!argbrk && argv[i][0] == '-') {
+      if (!std::strcmp(argv[i], "--")) {
+        argbrk = true;
+      } else if (!std::strcmp(argv[i], "-th")) {
+        if (++i >= argc) usage();
+        thnum = kc::atoix(argv[i]);
+      } else if (!std::strcmp(argv[i], "-iv")) {
+        if (++i >= argc) usage();
+        iv = kc::atof(argv[i]);
+      } else {
+        usage();
+      }
+    } else if (!rstr) {
+      argbrk = true;
+      rstr = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if (!rstr) usage();
+  int64_t rnum = kc::atoix(rstr);
+  if (rnum < 1 || thnum < 1) usage();
+  if (thnum > THREADMAX) thnum = THREADMAX;
+  int32_t rv = proccond(rnum, thnum, iv);
   return rv;
 }
 
@@ -1087,6 +1127,180 @@ static int32_t procmutex(int64_t rnum, int32_t thnum, double iv) {
   }
   if (anum.get() != rnum * thnum * 3) {
     errprint(__LINE__, "AtomicInt64::get: %lld", (long long)anum.get());
+    err = true;
+  }
+  etime = kc::time();
+  oprintf("time: %.3f\n", etime - stime);
+  oprintf("%s\n\n", err ? "error" : "ok");
+  return err ? 1 : 0;
+}
+
+
+// perform cond command
+static int32_t proccond(int64_t rnum, int32_t thnum, double iv) {
+  oprintf("<Mutex Test>\n  seed=%u  rnum=%lld  thnum=%d  iv=%.3f\n\n",
+          g_randseed, (long long)rnum, thnum, iv);
+  bool err = false;
+  kc::Mutex mutex;
+  kc::CondVar cond;
+  oprintf("conditon variable:\n");
+  double stime = kc::time();
+  class ThreadCondVar : public kc::Thread {
+   public:
+    void setparams(int32_t id, kc::Mutex* mutex, kc::CondVar* cond,
+                   int64_t rnum, int32_t thnum, double iv) {
+      id_ = id;
+      mutex_ = mutex;
+      cond_ = cond;
+      rnum_ = rnum;
+      thnum_ = thnum;
+      iv_ = iv;
+      active_ = 1;
+    }
+    bool active() {
+      return active_ > 0;
+    }
+    void run() {
+      for (int64_t i = 1; i <= rnum_; i++) {
+        mutex_->lock();
+        if (i % 2 < 1) {
+          if (iv_ > 0) {
+            sleep(iv_);
+          } else if (iv_ < 0) {
+            yield();
+          }
+        }
+        if (i % 7 == 0) {
+          cond_->wait(mutex_, 0.001);
+        } else {
+          cond_->wait(mutex_);
+        }
+        mutex_->unlock();
+        if (i % 2 > 0) {
+          if (iv_ > 0) {
+            sleep(iv_);
+          } else if (iv_ < 0) {
+            yield();
+          }
+        }
+        if (id_ < 1 && rnum_ > 250 && i % (rnum_ / 250) == 0) {
+          oputchar('.');
+          if (i == rnum_ || i % (rnum_ / 10) == 0) oprintf(" (%08lld)\n", (long long)i);
+        }
+      }
+      active_ = 0;
+    }
+   private:
+    int32_t id_;
+    kc::Mutex* mutex_;
+    kc::CondVar* cond_;
+    int64_t rnum_;
+    int32_t thnum_;
+    double iv_;
+    kc::AtomicInt64 active_;
+  };
+  ThreadCondVar threadcondvars[THREADMAX];
+  for (int32_t i = 0; i < thnum; i++) {
+    threadcondvars[i].setparams(i, &mutex, &cond, rnum, thnum, iv);
+    threadcondvars[i].start();
+  }
+  int64_t cnt = 0;
+  while (true) {
+    if (iv > 0) {
+      kc::Thread::sleep(iv);
+    } else if (iv < 0) {
+      kc::Thread::yield();
+    }
+    int32_t actnum = 0;
+    for (int32_t i = 0; i < thnum; i++) {
+      if (threadcondvars[i].active()) actnum++;
+      if (cnt % (thnum + 1) < 1) {
+        cond.broadcast();
+      } else {
+        cond.signal();
+      }
+    }
+    if (actnum < 1) break;
+    cnt++;
+  }
+  for (int32_t i = 0; i < thnum; i++) {
+    threadcondvars[i].join();
+  }
+  double etime = kc::time();
+  oprintf("time: %.3f\n", etime - stime);
+  kc::CondMap cmap;
+  oprintf("conditon map:\n");
+  stime = kc::time();
+  class ThreadCondMap : public kc::Thread {
+   public:
+    void setparams(int32_t id, kc::CondMap* cmap, int64_t rnum, int32_t thnum, double iv) {
+      id_ = id;
+      cmap_ = cmap;
+      rnum_ = rnum;
+      thnum_ = thnum;
+      iv_ = iv;
+      active_ = 1;
+    }
+    bool active() {
+      return active_ > 0;
+    }
+    void run() {
+      for (int64_t i = 1; i <= rnum_; i++) {
+        if (iv_ > 0) {
+          sleep(iv_);
+        } else if (iv_ < 0) {
+          yield();
+        }
+        char kbuf[RECBUFSIZ];
+        size_t ksiz = std::sprintf(kbuf, "%08d", (int)(i % thnum_));
+        cmap_->wait(kbuf, ksiz, 0.001);
+        if (id_ < 1 && rnum_ > 250 && i % (rnum_ / 250) == 0) {
+          oputchar('.');
+          if (i == rnum_ || i % (rnum_ / 10) == 0) oprintf(" (%08lld)\n", (long long)i);
+        }
+      }
+      active_ = 0;
+    }
+   private:
+    int32_t id_;
+    kc::CondMap* cmap_;
+    int64_t rnum_;
+    int32_t thnum_;
+    double iv_;
+    kc::AtomicInt64 active_;
+  };
+  ThreadCondMap threadcondmaps[THREADMAX];
+  for (int32_t i = 0; i < thnum; i++) {
+    threadcondmaps[i].setparams(i, &cmap, rnum, thnum, iv);
+    threadcondmaps[i].start();
+  }
+  cnt = 0;
+  while (true) {
+    if (iv > 0) {
+      kc::Thread::sleep(iv);
+    } else if (iv < 0) {
+      kc::Thread::yield();
+    }
+    int32_t actnum = 0;
+    for (int32_t i = 0; i < thnum; i++) {
+      if (threadcondmaps[i].active()) actnum++;
+      char kbuf[RECBUFSIZ];
+      size_t ksiz = std::sprintf(kbuf, "%08d", (int)i);
+      if (cnt % (thnum + 1) < 1) {
+        cmap.broadcast_all();
+      } else {
+        cmap.signal(kbuf, ksiz);
+      }
+    }
+    if (cnt % 1024 < 1) cmap.broadcast_all();
+    if (actnum < 1) break;
+    cnt++;
+  }
+  for (int32_t i = 0; i < thnum; i++) {
+    threadcondmaps[i].join();
+  }
+  if (cmap.count() != 0) {
+    errprint(__LINE__, "CondMap::count");
     err = true;
   }
   etime = kc::time();

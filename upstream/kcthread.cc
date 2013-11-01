@@ -1923,7 +1923,7 @@ void CondVar::signal() {
 
 
 /**
- * Send the wake-up signal to all waiting threads.
+ * Send the wake-up signals to all waiting threads.
  */
 void CondVar::broadcast() {
 #if defined(_SYS_MSVC_) || defined(_SYS_MINGW_)

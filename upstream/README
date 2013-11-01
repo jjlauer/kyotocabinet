@@ -10,6 +10,7 @@ How to install Kyoto Cabinet is explained in the specification.
   README         - this file
   COPYING        - license (GPLv3)
   FOSSEXCEPTION  - license exception for FOSS
+  LINKEXCEPTION  - license exception for specific libraries
   ChangeLog      - history of enhancement
   doc/index.html - index of documents
 
