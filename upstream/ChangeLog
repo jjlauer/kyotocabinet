@@ -1,3 +1,9 @@
+2011-05-19  FAL Labs  <info@fallabs.com>
+
+	* kcplantdb.cc (PlantDB::accept): locking mode of transaction was modified.
+
+	- Release: 1.2.58
+
 2011-05-18  FAL Labs  <info@fallabs.com>
 
 	* kclangc.cc (kcdbincrint, kcdbincrdouble): "orig" parameter was added.

@@ -149,7 +149,12 @@ class PlantDB : public BasicDB {
      */
     bool accept(Visitor* visitor, bool writable = true, bool step = false) {
       _assert_(visitor);
-      db_->mlock_.lock_reader();
+      bool wrlock = writable && (db_->tran_ || db_->autotran_);
+      if (wrlock) {
+        db_->mlock_.lock_writer();
+      } else {
+        db_->mlock_.lock_reader();
+      }
       if (db_->omode_ == 0) {
         db_->set_error(_KCCODELINE_, Error::INVALID, "not opened");
         db_->mlock_.unlock();
@@ -169,8 +174,10 @@ class PlantDB : public BasicDB {
       bool hit = false;
       if (lid_ > 0 && !accept_spec(visitor, writable, step, &hit)) err = true;
       if (!err && !hit) {
-        db_->mlock_.unlock();
-        db_->mlock_.lock_writer();
+        if (!wrlock) {
+          db_->mlock_.unlock();
+          db_->mlock_.lock_writer();
+        }
         if (kbuf_) {
           bool retry = true;
           while (!err && retry) {
@@ -964,7 +971,12 @@ class PlantDB : public BasicDB {
    */
   bool accept(const char* kbuf, size_t ksiz, Visitor* visitor, bool writable = true) {
     _assert_(kbuf && ksiz <= MEMMAXSIZ && visitor);
-    mlock_.lock_reader();
+    bool wrlock = writable && (tran_ || autotran_);
+    if (wrlock) {
+      mlock_.lock_writer();
+    } else {
+      mlock_.lock_reader();
+    }
     if (omode_ == 0) {
       set_error(_KCCODELINE_, Error::INVALID, "not opened");
       mlock_.unlock();
@@ -1017,9 +1029,11 @@ class PlantDB : public BasicDB {
       if (!clean_leaf_cache_part(lslot)) err = true;
       flush = true;
     }
-    mlock_.unlock();
     if (reorg) {
-      mlock_.lock_writer();
+      if (!wrlock) {
+        mlock_.unlock();
+        mlock_.lock_writer();
+      }
       node = search_tree(link, false, hist, &hnum);
       if (node) {
         if (!reorganize_tree(node, hist, hnum)) err = true;
@@ -1027,13 +1041,18 @@ class PlantDB : public BasicDB {
       }
       mlock_.unlock();
     } else if (flush) {
+      if (!wrlock) {
+        mlock_.unlock();
+        mlock_.lock_writer();
+      }
       int32_t idx = id % SLOTNUM;
       LeafSlot* lslot = lslots_ + idx;
-      mlock_.lock_writer();
       if (!flush_leaf_cache_part(lslot)) err = true;
       InnerSlot* islot = islots_ + idx;
       if (islot->warm->count() > lslot->warm->count() + lslot->hot->count() + 1 &&
           !flush_inner_cache_part(islot)) err = true;
+      mlock_.unlock();
+    } else {
       mlock_.unlock();
     }
     if (rbuf != rstack) delete[] rbuf;
