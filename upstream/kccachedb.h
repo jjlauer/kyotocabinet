@@ -584,7 +584,7 @@ class CacheDB : public BasicDB {
       return false;
     }
     if (thnum < 1) thnum = 1;
-    thnum = std::pow(2, (int32_t)std::log2(thnum * std::sqrt(2)));
+    thnum = std::pow(2.0, (int32_t)(std::log(thnum * std::sqrt(2.0)) / std::log(2.0)));
     if (thnum > (size_t)SLOTNUM) thnum = SLOTNUM;
     ScopedVisitor svis(visitor);
     int64_t allcnt = count_impl();

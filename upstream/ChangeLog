@@ -1,3 +1,9 @@
+2011-06-07  FAL Labs  <info@fallabs.com>
+
+	* kccachedb.h (CacheDB::scan_parallel): a bug related to overloading was fixed.
+
+	- Release: 1.2.60
+
 2011-05-30  FAL Labs  <info@fallabs.com>
 
 	* kcdb.h (BasicDB::scan_parallel, BasicDB::scan_parallel_impl): new functions.
