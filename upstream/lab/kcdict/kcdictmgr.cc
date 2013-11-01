@@ -111,9 +111,11 @@ static void normalizequery(const std::string& query, std::string* dest) {
   bool lowmode = true;
   bool nacmode = true;
   bool spcmode = true;
-  std::vector<uint32_t> ucs;
-  kc::strutftoucs(query, &ucs);
-  size_t onum = ucs.size();
+  size_t rsiz = query.size();
+  uint32_t ucsstack[1024];
+  uint32_t* ucs = rsiz > sizeof(ucsstack) / sizeof(*ucsstack) ? new uint32_t[rsiz] : ucsstack;
+  size_t onum;
+  kc::strutftoucs(query.c_str(), ucs, &onum);
   size_t nnum = 0;
   for (size_t i = 0; i < onum; i++) {
     uint32_t c = ucs[i];
@@ -521,7 +523,13 @@ static void normalizequery(const std::string& query, std::string* dest) {
       ucs[nnum++] = c;
     }
   }
-  kc::strucstoutf(ucs, dest);
+  rsiz = query.size() + 1;
+  char utfstack[2048];
+  char* utf = rsiz > sizeof(utfstack) ? new char[rsiz] : utfstack;
+  rsiz = kc::strucstoutf(ucs, nnum, utf);
+  dest->append(utf, rsiz);
+  if (utf != utfstack) delete[] utf;
+  if (ucs != ucsstack) delete[] ucs;
 }
 
 
@@ -745,7 +753,7 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
      public:
       VisitorImpl(const std::string& query, int64_t max) :
           qbuf_(query.data()), qsiz_(query.size()), max_(max), thres_(0), lock_(), queue_() {
-        if (qsiz_ > 256) qsiz_ = 256;
+        if (qsiz_ > kc::UINT8MAX) qsiz_ = kc::UINT8MAX;
         thres_ = qsiz_ / 3;
         if (thres_ < 3) thres_ = 3;
       }
@@ -757,11 +765,11 @@ static int32_t procsearch(const char* path, const char* query, int64_t max,
         while (ksiz > 0 && kbuf[ksiz] != '\t') {
           ksiz--;
         }
-        if (ksiz > 256) ksiz = 256;
+        if (ksiz > kc::UINT8MAX) ksiz = kc::UINT8MAX;
         const char* qbuf = qbuf_;
         size_t qsiz = qsiz_;
         size_t dsiz = qsiz + 1;
-        uint32_t* tbl = new uint32_t[(ksiz+1)*dsiz];
+        uint8_t* tbl = new uint8_t[(ksiz+1)*dsiz];
         for (size_t i = 0; i <= ksiz; i++) {
           tbl[i*dsiz] = i;
         }

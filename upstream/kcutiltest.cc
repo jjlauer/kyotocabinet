@@ -2556,8 +2556,8 @@ static int32_t procmisc(int64_t rnum) {
       int32_t unum = myrand(64);
       std::vector<uint32_t> oucs;
       for (int32_t j = 0; j < unum; j++) {
-        uint32_t c = std::pow(2, myrand(310000) / 10000.0);
-        if (c > 0 && c < (uint32_t)kc::INT32MAX) oucs.push_back(c);
+        uint32_t c = std::pow(2, myrand(31000000) / 1000000.0);
+        oucs.push_back(c);
       }
       std::string utf;
       kc::strucstoutf(oucs, &utf);
@@ -2575,6 +2575,22 @@ static int32_t procmisc(int64_t rnum) {
         errprint(__LINE__, "strutftoucs: %d:%d", (int)nucs.size(), (int)oucs.size());
         err = true;
       }
+      uint32_t* cucs = new uint32_t[utf.size()+1];
+      size_t cucsnum;
+      kc::strutftoucs(utf.c_str(), cucs, &cucsnum);
+      if (cucsnum == oucs.size()) {
+        char* cutf = new char[cucsnum*6+1];
+        kc::strucstoutf(cucs, cucsnum, cutf);
+        if (std::strcmp(cutf, utf.c_str())) {
+          errprint(__LINE__, "strucstoutf");
+          err = true;
+        }
+        delete[] cutf;
+      } else {
+        errprint(__LINE__, "strutftoucs");
+        err = true;
+      }
+      delete[] cucs;
       int32_t tnum = myrand(64);
       std::vector<std::string> ovec;
       std::map<std::string, std::string> omap;

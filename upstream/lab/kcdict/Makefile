@@ -59,7 +59,7 @@ check :
 dict :
 	ls *.tsv | while read path ; \
 	  do \
-	    ./kcdictmgr import "$${path%.tsv}.kct" "$$path" ; \
+	    $(RUNENV) ./kcdictmgr import "$${path%.tsv}.kct" "$$path" ; \
 	  done
 
 

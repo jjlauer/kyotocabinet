@@ -730,6 +730,27 @@ bool stribwm(const char* str, const char* key);
 
 
 /**
+ * Convert a UTF-8 string into a UCS-4 vector.
+ * @param src the source object.
+ * @param dest the destination object.  It must have enough size.
+ * @param np the pointer to the variable into which the number of elements in the destination
+ * object is assgined.
+ */
+void strutftoucs(const char* src, uint32_t* dest, size_t* np);
+
+
+
+/**
+ * Convert a UCS-4 vector into a UTF-8 string.
+ * @param src the source object.
+ * @param snum the number of elements in the source object.
+ * @param dest the destination object.  It must have enough size.
+ * @return the size of the result string.
+ */
+size_t strucstoutf(const uint32_t* src, size_t snum, char* dest);
+
+
+/**
  * Allocate a region on memory.
  * @param size the size of the region.
  * @return the pointer to the allocated region.
@@ -1691,42 +1712,45 @@ inline std::string* strtrim(std::string* str) {
  */
 inline void strutftoucs(const std::string& src, std::vector<uint32_t>* dest) {
   _assert_(dest);
-  const unsigned char* rp = (unsigned char*)src.c_str();
-  while (*rp != '\0') {
-    uint32_t c = *(unsigned char*)rp;
+  dest->reserve(dest->size() + src.size());
+  size_t size = src.size();
+  size_t ri = 0;
+  while (ri < size) {
+    uint32_t c = (unsigned char)src[ri];
     if (c < 0x80) {
       dest->push_back(c);
     } else if (c < 0xe0) {
-      if (rp[1] >= 0x80) {
-        dest->push_back(((rp[0] & 0x1f) << 6) | (rp[1] & 0x3f));
-        rp++;
+      if (ri + 1 < size) {
+        dest->push_back(((c & 0x1f) << 6) | (src[ri+1] & 0x3f));
+        ri++;
       }
     } else if (c < 0xf0) {
-      if (rp[1] >= 0x80 && rp[2] >= 0x80) {
-        dest->push_back(((rp[0] & 0x0f) << 12) | ((rp[1] & 0x3f) << 6) | (rp[2] & 0x3f));
-        rp += 2;
+      if (ri + 2 < size) {
+        dest->push_back(((c & 0x0f) << 12) | ((src[ri+1] & 0x3f) << 6) | (src[ri+2] & 0x3f));
+        ri += 2;
       }
     } else if (c < 0xf8) {
-      if (rp[1] >= 0x80 && rp[2] >= 0x80 && rp[3] >= 0x80) {
-        dest->push_back(((rp[0] & 0x07) << 18) | ((rp[1] & 0x3f) << 12) |
-                        ((rp[2] & 0x3f) << 6) | (rp[3] & 0x3f));
-        rp += 3;
+      if (ri + 3 < size) {
+        dest->push_back(((c & 0x07) << 18) | ((src[ri+1] & 0x3f) << 12) |
+                        ((src[ri+2] & 0x3f) << 6) | (src[ri+3] & 0x3f));
+        ri += 3;
       }
     } else if (c < 0xfc) {
-      if (rp[1] >= 0x80 && rp[2] >= 0x80 && rp[3] >= 0x80 && rp[4] >= 0x80) {
-        dest->push_back(((rp[0] & 0x03) << 24) | ((rp[1] & 0x3f) << 18) |
-                        ((rp[2] & 0x3f) << 12) | ((rp[3] & 0x3f) << 6) | (rp[4] & 0x3f));
-        rp += 4;
+      if (ri + 4 < size) {
+        dest->push_back(((c & 0x03) << 24) | ((src[ri+1] & 0x3f) << 18) |
+                        ((src[ri+2] & 0x3f) << 12) | ((src[ri+3] & 0x3f) << 6) |
+                        (src[ri+4] & 0x3f));
+        ri += 4;
       }
     } else if (c < 0xfe) {
-      if (rp[1] >= 0x80 && rp[2] >= 0x80 && rp[3] >= 0x80 && rp[4] >= 0x80 && rp[4] >= 0x80) {
-        dest->push_back(((rp[0] & 0x01) << 30) | ((rp[1] & 0x3f) << 24) |
-                        ((rp[2] & 0x3f) << 18) | ((rp[3] & 0x3f) << 12) |
-                        ((rp[4] & 0x3f) << 6) | (rp[5] & 0x3f));
-        rp += 5;
+      if (ri + 5 < size) {
+        dest->push_back(((c & 0x01) << 30) | ((src[ri+1] & 0x3f) << 24) |
+                        ((src[ri+2] & 0x3f) << 18) | ((src[ri+3] & 0x3f) << 12) |
+                        ((src[ri+4] & 0x3f) << 6) | (src[ri+5] & 0x3f));
+        ri += 5;
       }
     }
-    rp++;
+    ri++;
   }
 }
 
@@ -1736,6 +1760,7 @@ inline void strutftoucs(const std::string& src, std::vector<uint32_t>* dest) {
  */
 inline void strucstoutf(const std::vector<uint32_t>& src, std::string* dest) {
   _assert_(dest);
+  dest->reserve(dest->size() + src.size() * 3);
   std::vector<uint32_t>::const_iterator it = src.begin();
   std::vector<uint32_t>::const_iterator itend = src.end();
   while (it != itend) {
@@ -2577,6 +2602,97 @@ inline bool stribwm(const char* str, const char* key) {
     if (sc != kc) return false;
   }
   return true;
+}
+
+
+/**
+ * Convert a UTF-8 string into a UCS-4 vector.
+ */
+inline void strutftoucs(const char* src, uint32_t* dest, size_t* np) {
+  _assert_(src && dest && np);
+  const unsigned char* rp = (unsigned char*)src;
+  size_t dnum = 0;
+  while (*rp != '\0') {
+    uint32_t c = *rp;
+    if (c < 0x80) {
+      dest[dnum++] = c;
+    } else if (c < 0xe0) {
+      if (rp[1] != '\0') {
+        dest[dnum++] = ((c & 0x1f) << 6) | (rp[1] & 0x3f);
+        rp++;
+      }
+    } else if (c < 0xf0) {
+      if (rp[1] != '\0' && rp[2] != '\0') {
+        dest[dnum++] = ((c & 0x0f) << 12) | ((rp[1] & 0x3f) << 6) | (rp[2] & 0x3f);
+        rp += 2;
+      }
+    } else if (c < 0xf8) {
+      if (rp[1] != '\0' && rp[2] != '\0' && rp[3] != '\0') {
+        dest[dnum++] = ((c & 0x07) << 18) | ((rp[1] & 0x3f) << 12)
+            | ((rp[2] & 0x3f) << 6) | (rp[3] & 0x3f);
+        rp += 3;
+      }
+    } else if (c < 0xfc) {
+      if (rp[1] != '\0' && rp[2] != '\0' && rp[3] != '\0' && rp[4] != '\0') {
+        dest[dnum++] = ((c & 0x03) << 24) | ((rp[1] & 0x3f) << 18) |
+            ((rp[2] & 0x3f) << 12) | ((rp[3] & 0x3f) << 6) | (rp[4] & 0x3f);
+        rp += 4;
+      }
+    } else if (c < 0xfe) {
+      if (rp[1] != '\0' && rp[2] != '\0' && rp[3] != '\0' && rp[4] != '\0' && rp[5] != '\0') {
+        dest[dnum++] = ((c & 0x01) << 30) | ((rp[1] & 0x3f) << 24) |
+            ((rp[2] & 0x3f) << 18) | ((rp[3] & 0x3f) << 12) |
+            ((rp[4] & 0x3f) << 6) | (rp[5] & 0x3f);
+        rp += 5;
+      }
+    }
+    rp++;
+  }
+  *np = dnum;
+}
+
+
+/**
+ * Convert a UCS-4 array into a UTF-8 string.
+ */
+inline size_t strucstoutf(const uint32_t* src, size_t snum, char* dest) {
+  _assert_(src && snum <= MEMMAXSIZ && dest);
+  const uint32_t* ep = src + snum;
+  unsigned char* wp = (unsigned char*)dest;
+  while (src < ep) {
+    uint32_t c = *src;
+    if (c < 0x80) {
+      *(wp++) = c;
+    } else if (c < 0x800) {
+      *(wp++) = 0xc0 | (c >> 6);
+      *(wp++) = 0x80 | (c & 0x3f);
+    } else if (c < 0x10000) {
+      *(wp++) = 0xe0 | (c >> 12);
+      *(wp++) = 0x80 | ((c & 0xfff) >> 6);
+      *(wp++) = 0x80 | (c & 0x3f);
+    } else if (c < 0x200000) {
+      *(wp++) = 0xf0 | (c >> 18);
+      *(wp++) = 0x80 | ((c & 0x3ffff) >> 12);
+      *(wp++) = 0x80 | ((c & 0xfff) >> 6);
+      *(wp++) = 0x80 | (c & 0x3f);
+    } else if (c < 0x4000000) {
+      *(wp++) = 0xf8 | (c >> 24);
+      *(wp++) = 0x80 | ((c & 0xffffff) >> 18);
+      *(wp++) = 0x80 | ((c & 0x3ffff) >> 12);
+      *(wp++) = 0x80 | ((c & 0xfff) >> 6);
+      *(wp++) = 0x80 | (c & 0x3f);
+    } else if (c < 0x80000000) {
+      *(wp++) = 0xfc | (c >> 30);
+      *(wp++) = 0x80 | ((c & 0x3fffffff) >> 24);
+      *(wp++) = 0x80 | ((c & 0xffffff) >> 18);
+      *(wp++) = 0x80 | ((c & 0x3ffff) >> 12);
+      *(wp++) = 0x80 | ((c & 0xfff) >> 6);
+      *(wp++) = 0x80 | (c & 0x3f);
+    }
+    src++;
+  }
+  *wp = '\0';
+  return wp - (unsigned char*)dest;
 }
 
 

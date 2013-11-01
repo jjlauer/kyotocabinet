@@ -1,3 +1,9 @@
+2011-07-14  FAL Labs  <info@fallabs.com>
+
+	* kcutil.h (strutftoucs, strucstoutf): performance was improved.
+
+	- Release: 1.2.68
+
 2011-07-12  FAL Labs  <info@fallabs.com>
 
 	* kcutil.h (memicmp, memmem, memimem, stristr): new functions.
