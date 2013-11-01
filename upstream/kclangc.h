@@ -580,6 +580,22 @@ int32_t kcdbgetbuf(KCDB* db, const char* kbuf, size_t ksiz, char* vbuf, size_t m
 
 
 /**
+ * Retrieve the value of a record and remove it atomically.
+ * @param db a database object.
+ * @param kbuf the pointer to the key region.
+ * @param ksiz the size of the key region.
+ * @param sp the pointer to the variable into which the size of the region of the return
+ * value is assigned.
+ * @return the pointer to the value region of the corresponding record, or NULL on failure.
+ * @note If no record corresponds to the key, NULL is returned.  Because an additional zero
+ * code is appended at the end of the region of the return value, the return value can be
+ * treated as a C-style string.  The region of the return value should be released with the
+ * kcfree function when it is no longer in use.
+ */
+char* kcdbseize(KCDB* db, const char* kbuf, size_t ksiz, size_t* sp);
+
+
+/**
  * Store records at once.
  * @param db a database object.
  * @param recs the records to store.
@@ -886,6 +902,24 @@ char* kccurgetvalue(KCCUR* cur, size_t* sp, int32_t step);
  * function when it is no longer in use.
  */
 char* kccurget(KCCUR* cur, size_t* ksp, const char** vbp, size_t* vsp, int32_t step);
+
+
+/**
+ * Get a pair of the key and the value of the current record and remove it atomically.
+ * @param cur a cursor object.
+ * @param ksp the pointer to the variable into which the size of the region of the return
+ * value is assigned.
+ * @param vbp the pointer to the variable into which the pointer to the value region is
+ * assigned.
+ * @param vsp the pointer to the variable into which the size of the value region is
+ * assigned.
+ * @return the pointer to the pair of the key region, or NULL on failure.
+ * @note If the cursor is invalidated, NULL is returned.  Because an additional zero code is
+ * appended at the end of each region of the key and the value, each region can be treated
+ * as a C-style string.  The region of the return value should be released with the kcfree
+ * function when it is no longer in use.  The cursor is moved to the next record implicitly.
+ */
+char* kccurseize(KCCUR* cur, size_t* ksp, const char** vbp, size_t* vsp);
 
 
 /**

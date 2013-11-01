@@ -1085,7 +1085,7 @@ class TaskQueue {
      * Get the ID number of the task.
      * @return the ID number of the task, which is incremented from 1.
      */
-    uint64_t id() {
+    uint64_t id() const {
       _assert_(true);
       return id_;
     }
@@ -1094,7 +1094,7 @@ class TaskQueue {
      * @return the ID number of the worker thread.  It is from 0 to less than the number of
      * worker threads.
      */
-    uint32_t thread_id() {
+    uint32_t thread_id() const {
       _assert_(true);
       return thid_;
     }
@@ -1102,7 +1102,7 @@ class TaskQueue {
      * Check whether the thread is to be aborted.
      * @return true if the thread is to be aborted, or false if not.
      */
-    bool aborted() {
+    bool aborted() const {
       _assert_(true);
       return aborted_;
     }
@@ -1131,6 +1131,22 @@ class TaskQueue {
    * @param task a task object.
    */
   virtual void do_task(Task* task) = 0;
+  /**
+   * Process the starting event.
+   * @param task a task object.
+   * @note This is called for each thread on starting.
+   */
+  virtual void do_start(const Task* task) {
+    _assert_(true);
+  }
+  /**
+   * Process the finishing event.
+   * @param task a task object.
+   * @note This is called for each thread on finishing.
+   */
+  virtual void do_finish(const Task* task) {
+    _assert_(true);
+  }
   /**
    * Start the task queue.
    * @param thnum the number of worker threads.
@@ -1222,6 +1238,10 @@ class TaskQueue {
    private:
     void run() {
       _assert_(true);
+      Task* stask = new Task;
+      stask->thid_ = id_;
+      queue_->do_start(stask);
+      delete stask;
       bool empty = false;
       while (true) {
         queue_->mutex_.lock();
@@ -1243,6 +1263,11 @@ class TaskQueue {
         queue_->mutex_.unlock();
         if (task) queue_->do_task(task);
       }
+      Task* ftask = new Task;
+      ftask->thid_ = id_;
+      ftask->aborted_ = true;
+      queue_->do_finish(ftask);
+      delete ftask;
     }
     uint32_t id_;
     TaskQueue* queue_;

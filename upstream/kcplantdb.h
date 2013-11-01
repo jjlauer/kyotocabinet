@@ -122,7 +122,8 @@ class PlantDB : public BasicDB {
      * Constructor.
      * @param db the container database object.
      */
-    explicit Cursor(PlantDB* db) : db_(db), stack_(), kbuf_(NULL), ksiz_(0), lid_(0) {
+    explicit Cursor(PlantDB* db) :
+        db_(db), stack_(), kbuf_(NULL), ksiz_(0), lid_(0), back_(false) {
       _assert_(db);
       ScopedRWLock lock(&db_->mlock_, true);
       db_->curs_.push_back(this);
@@ -172,7 +173,11 @@ class PlantDB : public BasicDB {
       }
       bool err = false;
       bool hit = false;
+
+
       if (lid_ > 0 && !accept_spec(visitor, writable, step, &hit)) err = true;
+
+
       if (!err && !hit) {
         if (!wrlock) {
           db_->mlock_.unlock();
@@ -205,6 +210,7 @@ class PlantDB : public BasicDB {
       if (kbuf_) clear_position();
       bool err = false;
       if (!set_position(db_->first_)) err = true;
+      back_ = false;
       return !err;
     }
     /**
@@ -227,6 +233,7 @@ class PlantDB : public BasicDB {
         if (kbuf_) clear_position();
         err = true;
       }
+      back_ = false;
       return !err;
     }
     /**
@@ -253,6 +260,7 @@ class PlantDB : public BasicDB {
       if (kbuf_) clear_position();
       bool err = false;
       if (!set_position_back(db_->last_)) err = true;
+      back_ = true;
       return !err;
     }
     /**
@@ -290,6 +298,7 @@ class PlantDB : public BasicDB {
         if (kbuf_) clear_position();
         if (!set_position_back(db_->last_)) err = true;
       }
+      back_ = true;
       return !err;
     }
     /**
@@ -313,6 +322,7 @@ class PlantDB : public BasicDB {
         db_->set_error(_KCCODELINE_, Error::NOREC, "no record");
         return false;
       }
+      back_ = false;
       return true;
     }
     /**
@@ -346,6 +356,7 @@ class PlantDB : public BasicDB {
         }
       }
       db_->mlock_.unlock();
+      back_ = true;
       return !err;
     }
     /**
@@ -515,11 +526,23 @@ class PlantDB : public BasicDB {
                   std::memcpy(lbuf + sizeof(*link), kbuf, ksiz);
                 }
                 xfree(rec);
-                typename RecordArray::iterator ritnext = rit + 1;
-                if (ritnext != ritend) {
-                  clear_position();
-                  set_position(*ritnext, node->id);
-                  step = false;
+                if (back_) {
+                  if (rit == recs.begin()) {
+                    step = true;
+                  } else {
+                    typename RecordArray::iterator ritprev = rit - 1;
+                    set_position(*ritprev, node->id);
+                    step = false;
+                  }
+                } else {
+                  typename RecordArray::iterator ritnext = rit + 1;
+                  if (ritnext == ritend) {
+                    step = true;
+                  } else {
+                    clear_position();
+                    set_position(*ritnext, node->id);
+                    step = false;
+                  }
                 }
                 recs.erase(rit);
               } else if (vbuf != Visitor::NOP) {
@@ -544,11 +567,19 @@ class PlantDB : public BasicDB {
                 }
               }
               if (step) {
-                ++rit;
-                if (rit != ritend) {
-                  clear_position();
-                  set_position(*rit, node->id);
-                  step = false;
+                if (back_) {
+                  if (rit != recs.begin()) {
+                    --rit;
+                    set_position(*rit, node->id);
+                    step = false;
+                  }
+                } else {
+                  ++rit;
+                  if (rit != ritend) {
+                    clear_position();
+                    set_position(*rit, node->id);
+                    step = false;
+                  }
                 }
               }
             }
@@ -559,7 +590,11 @@ class PlantDB : public BasicDB {
         node->lock.unlock();
         if (hit && step) {
           clear_position();
-          set_position(node->next);
+          if (back_) {
+            set_position_back(node->prev);
+          } else {
+            set_position(node->next);
+          }
         }
         if (hit) {
           bool flush = db_->cusage_ > db_->pccap_;
@@ -681,11 +716,22 @@ class PlantDB : public BasicDB {
           node->size -= rsiz;
           node->dirty = true;
           xfree(rec);
-          typename RecordArray::iterator ritnext = rit + 1;
-          if (ritnext != ritend) {
-            clear_position();
-            set_position(*ritnext, node->id);
-            step = false;
+          step = false;
+          clear_position();
+          if (back_) {
+            if (rit == recs.begin()) {
+              set_position_back(node->prev);
+            } else {
+              typename RecordArray::iterator ritprev = rit - 1;
+              set_position(*ritprev, node->id);
+            }
+          } else {
+            typename RecordArray::iterator ritnext = rit + 1;
+            if (ritnext == ritend) {
+              set_position(node->next);
+            } else {
+              set_position(*ritnext, node->id);
+            }
           }
           recs.erase(rit);
           if (recs.empty()) reorg = true;
@@ -704,13 +750,21 @@ class PlantDB : public BasicDB {
           if (node->size > db_->psiz_ && recs.size() > 1) reorg = true;
         }
         if (step) {
-          ++rit;
-          if (rit != ritend) {
-            clear_position();
-            set_position(*rit, node->id);
+          clear_position();
+          if (back_) {
+            if (rit == recs.begin()) {
+              set_position_back(node->prev);
+            } else {
+              --rit;
+              set_position(*rit, node->id);
+            }
           } else {
-            clear_position();
-            set_position(node->next);
+            ++rit;
+            if (rit == ritend) {
+              set_position(node->next);
+            } else {
+              set_position(*rit, node->id);
+            }
           }
         }
         bool atran = db_->autotran_ && !db_->tran_ && node->dirty;
@@ -731,16 +785,30 @@ class PlantDB : public BasicDB {
       } else {
         int64_t lid = lid_;
         clear_position();
-        if (set_position(node->next)) {
-          if (lid_ == lid) {
-            db_->set_error(_KCCODELINE_, Error::BROKEN, "invalid leaf node");
-            err = true;
+        if (back_) {
+          if (set_position_back(node->prev)) {
+            if (lid_ == lid) {
+              db_->set_error(_KCCODELINE_, Error::BROKEN, "invalid leaf node");
+              err = true;
+            } else {
+              *retryp = true;
+            }
           } else {
-            *retryp = true;
+            db_->set_error(_KCCODELINE_, Error::NOREC, "no record");
+            err = true;
           }
         } else {
-          db_->set_error(_KCCODELINE_, Error::NOREC, "no record");
-          err = true;
+          if (set_position(node->next)) {
+            if (lid_ == lid) {
+              db_->set_error(_KCCODELINE_, Error::BROKEN, "invalid leaf node");
+              err = true;
+            } else {
+              *retryp = true;
+            }
+          } else {
+            db_->set_error(_KCCODELINE_, Error::NOREC, "no record");
+            err = true;
+          }
         }
       }
       if (rbuf != rstack) delete[] rbuf;
@@ -913,6 +981,8 @@ class PlantDB : public BasicDB {
     size_t ksiz_;
     /** The last visited leaf. */
     int64_t lid_;
+    /** The backward flag. */
+    bool back_;
   };
   /**
    * Tuning options.

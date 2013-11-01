@@ -795,6 +795,95 @@ class BasicDB : public DB {
       return visitor.ok();
     }
     /**
+     * Get a pair of the key and the value of the current record and remove it atomically.
+     * @param ksp the pointer to the variable into which the size of the region of the return
+     * value is assigned.
+     * @param vbp the pointer to the variable into which the pointer to the value region is
+     * assigned.
+     * @param vsp the pointer to the variable into which the size of the value region is
+     * assigned.
+     * @return the pointer to the key region, or NULL on failure.
+     * @note If the cursor is invalidated, NULL is returned.  Because an additional zero code is
+     * appended at the end of each region of the key and the value, each region can be treated
+     * as a C-style string.  The return value should be deleted explicitly by the caller with
+     * the detele[] operator.  The cursor is moved to the next record implicitly.
+     */
+    char* seize(size_t* ksp, const char** vbp, size_t* vsp) {
+      _assert_(ksp && vbp && vsp);
+      class VisitorImpl : public Visitor {
+       public:
+        explicit VisitorImpl() : kbuf_(NULL), ksiz_(0), vbuf_(NULL), vsiz_(0) {}
+        char* pop(size_t* ksp, const char** vbp, size_t* vsp) {
+          *ksp = ksiz_;
+          *vbp = vbuf_;
+          *vsp = vsiz_;
+          return kbuf_;
+        }
+        void clear() {
+          delete[] kbuf_;
+        }
+       private:
+        const char* visit_full(const char* kbuf, size_t ksiz,
+                               const char* vbuf, size_t vsiz, size_t* sp) {
+          size_t rsiz = ksiz + 1 + vsiz + 1;
+          kbuf_ = new char[rsiz];
+          std::memcpy(kbuf_, kbuf, ksiz);
+          kbuf_[ksiz] = '\0';
+          ksiz_ = ksiz;
+          vbuf_ = kbuf_ + ksiz + 1;
+          std::memcpy(vbuf_, vbuf, vsiz);
+          vbuf_[vsiz] = '\0';
+          vsiz_ = vsiz;
+          return REMOVE;
+        }
+        char* kbuf_;
+        size_t ksiz_;
+        char* vbuf_;
+        size_t vsiz_;
+      };
+      VisitorImpl visitor;
+      if (!accept(&visitor, true, false)) {
+        visitor.clear();
+        *ksp = 0;
+        *vbp = NULL;
+        *vsp = 0;
+        return NULL;
+      }
+      return visitor.pop(ksp, vbp, vsp);
+    }
+    /**
+     * Get a pair of the key and the value of the current record and remove it atomically.
+     * @note Equal to the original Cursor::seize method except that parameters are strings
+     * to contain the result and the return value is bool for success.
+     */
+    bool seize(std::string* key, std::string* value) {
+      _assert_(key && value);
+      class VisitorImpl : public Visitor {
+       public:
+        explicit VisitorImpl(std::string* key, std::string* value) :
+            key_(key), value_(value), ok_(false) {}
+        bool ok() {
+          return ok_;
+        }
+       private:
+        const char* visit_full(const char* kbuf, size_t ksiz,
+                               const char* vbuf, size_t vsiz, size_t* sp) {
+          key_->clear();
+          key_->append(kbuf, ksiz);
+          value_->clear();
+          value_->append(vbuf, vsiz);
+          ok_ = true;
+          return REMOVE;
+        }
+        std::string* key_;
+        std::string* value_;
+        bool ok_;
+      };
+      VisitorImpl visitor(key, value);
+      if (!accept(&visitor, true, false)) return false;
+      return visitor.ok();
+    }
+    /**
      * Get the database object.
      * @return the database object.
      */
@@ -1846,12 +1935,29 @@ class BasicDB : public DB {
    */
   bool get(const std::string& key, std::string* value) {
     _assert_(value);
-    size_t vsiz;
-    char* vbuf = get(key.c_str(), key.size(), &vsiz);
-    if (!vbuf) return false;
-    value->clear();
-    value->append(vbuf, vsiz);
-    delete[] vbuf;
+    class VisitorImpl : public Visitor {
+     public:
+      explicit VisitorImpl(std::string* value) : value_(value), ok_(false) {}
+      bool ok() {
+        return ok_;
+      }
+     private:
+      const char* visit_full(const char* kbuf, size_t ksiz,
+                             const char* vbuf, size_t vsiz, size_t* sp) {
+        value_->clear();
+        value_->append(vbuf, vsiz);
+        ok_ = true;
+        return NOP;
+      }
+      std::string* value_;
+      bool ok_;
+    };
+    VisitorImpl visitor(value);
+    if (!accept(key.data(), key.size(), &visitor, false)) return false;
+    if (!visitor.ok()) {
+      set_error(_KCCODELINE_, Error::NOREC, "no record");
+      return false;
+    }
     return true;
   }
   /**
@@ -1891,6 +1997,88 @@ class BasicDB : public DB {
       return -1;
     }
     return vsiz;
+  }
+  /**
+   * Retrieve the value of a record and remove it atomically.
+   * @param kbuf the pointer to the key region.
+   * @param ksiz the size of the key region.
+   * @param sp the pointer to the variable into which the size of the region of the return
+   * value is assigned.
+   * @return the pointer to the value region of the corresponding record, or NULL on failure.
+   * @note If no record corresponds to the key, NULL is returned.  Because an additional zero
+   * code is appended at the end of the region of the return value, the return value can be
+   * treated as a C-style string.  Because the region of the return value is allocated with the
+   * the new[] operator, it should be released with the delete[] operator when it is no longer
+   * in use.
+   */
+  char* seize(const char* kbuf, size_t ksiz, size_t* sp) {
+    _assert_(kbuf && ksiz <= MEMMAXSIZ && sp);
+    class VisitorImpl : public Visitor {
+     public:
+      explicit VisitorImpl() : vbuf_(NULL), vsiz_(0) {}
+      char* pop(size_t* sp) {
+        *sp = vsiz_;
+        return vbuf_;
+      }
+     private:
+      const char* visit_full(const char* kbuf, size_t ksiz,
+                             const char* vbuf, size_t vsiz, size_t* sp) {
+        vbuf_ = new char[vsiz+1];
+        std::memcpy(vbuf_, vbuf, vsiz);
+        vbuf_[vsiz] = '\0';
+        vsiz_ = vsiz;
+        return REMOVE;
+      }
+      char* vbuf_;
+      size_t vsiz_;
+    };
+    VisitorImpl visitor;
+    if (!accept(kbuf, ksiz, &visitor, true)) {
+      *sp = 0;
+      return NULL;
+    }
+    size_t vsiz;
+    char* vbuf = visitor.pop(&vsiz);
+    if (!vbuf) {
+      set_error(_KCCODELINE_, Error::NOREC, "no record");
+      *sp = 0;
+      return NULL;
+    }
+    *sp = vsiz;
+    return vbuf;
+  }
+  /**
+   * Retrieve the value of a record and remove it atomically.
+   * @note Equal to the original DB::seize method except that the first parameters is the key
+   * string and the second parameter is a string to contain the result and the return value is
+   * bool for success.
+   */
+  bool seize(const std::string& key, std::string* value) {
+    _assert_(value);
+    class VisitorImpl : public Visitor {
+     public:
+      explicit VisitorImpl(std::string* value) : value_(value), ok_(false) {}
+      bool ok() {
+        return ok_;
+      }
+     private:
+      const char* visit_full(const char* kbuf, size_t ksiz,
+                             const char* vbuf, size_t vsiz, size_t* sp) {
+        value_->clear();
+        value_->append(vbuf, vsiz);
+        ok_ = true;
+        return REMOVE;
+      }
+      std::string* value_;
+      bool ok_;
+    };
+    VisitorImpl visitor(value);
+    if (!accept(key.data(), key.size(), &visitor, true)) return false;
+    if (!visitor.ok()) {
+      set_error(_KCCODELINE_, Error::NOREC, "no record");
+      return false;
+    }
+    return true;
   }
   /**
    * Store records at once.

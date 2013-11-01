@@ -172,7 +172,7 @@ uint32_t ZLIB::calculate_crc(const void* buf, size_t size, uint32_t seed) {
  * Hidden resources for LZO.
  */
 #if _KC_LZO
-int32_t lzo_init_func() {
+static int32_t lzo_init_func() {
   if (lzo_init() != LZO_E_OK) throw std::runtime_error("lzo_init");
   return 0;
 }

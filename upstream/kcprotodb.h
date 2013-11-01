@@ -125,13 +125,13 @@ class ProtoDB : public BasicDB {
           typename CursorList::const_iterator citend = db_->curs_.end();
           while (cit != citend) {
             Cursor* cur = *cit;
-            if (cur != this && cur->it_ == it_) cur->it_++;
+            if (cur != this && cur->it_ == it_) ++cur->it_;
             ++cit;
           }
         }
         db_->recs_.erase(it_++);
       } else if (vbuf == Visitor::NOP) {
-        if (step) it_++;
+        if (step) ++it_;
       } else {
         if (db_->tran_) {
           TranLog log(key, value);
@@ -140,7 +140,7 @@ class ProtoDB : public BasicDB {
         db_->size_ -= value.size();
         db_->size_ += vsiz;
         it_->second = std::string(vbuf, vsiz);
-        if (step) it_++;
+        if (step) ++it_;
       }
       return true;
     }
@@ -278,7 +278,7 @@ class ProtoDB : public BasicDB {
         db_->set_error(_KCCODELINE_, Error::NOREC, "no record");
         return false;
       }
-      it_++;
+      ++it_;
       if (it_ == db_->recs_.end()) {
         db_->set_error(_KCCODELINE_, Error::NOREC, "no record");
         return false;
@@ -413,7 +413,7 @@ class ProtoDB : public BasicDB {
             typename CursorList::const_iterator citend = curs_.end();
             while (cit != citend) {
               Cursor* cur = *cit;
-              if (cur->it_ == it) cur->it_++;
+              if (cur->it_ == it) ++cur->it_;
               ++cit;
             }
           }
@@ -512,7 +512,7 @@ class ProtoDB : public BasicDB {
             typename CursorList::const_iterator citend = curs_.end();
             while (cit != citend) {
               Cursor* cur = *cit;
-              if (cur->it_ == it) cur->it_++;
+              if (cur->it_ == it) ++cur->it_;
               ++cit;
             }
           }

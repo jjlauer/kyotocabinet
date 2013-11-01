@@ -1,4 +1,4 @@
-.TH "KCFORESTMGR" 1 "2011-06-12" "Man Page" "Kyoto Cabinet"
+.TH "KCFORESTMGR" 1 "2011-06-20" "Man Page" "Kyoto Cabinet"
 
 .SH NAME
 kcforestmgr \- command line interface to manage the directory tree database
@@ -29,12 +29,12 @@ Stores a record.
 Removes a record.
 .RE
 .br
-\fBkcforestmgr get \fR[\fB\-onl\fR|\fB\-otl\fR|\fB\-onr\fR]\fB \fR[\fB\-sx\fR]\fB \fR[\fB\-px\fR]\fB \fR[\fB\-pz\fR]\fB \fIpath\fB \fIkey\fB\fR
+\fBkcforestmgr get \fR[\fB\-onl\fR|\fB\-otl\fR|\fB\-onr\fR]\fB \fR[\fB\-rm\fR]\fB \fR[\fB\-sx\fR]\fB \fR[\fB\-px\fR]\fB \fR[\fB\-pz\fR]\fB \fIpath\fB \fIkey\fB\fR
 .RS
 Prints the value of a record.
 .RE
 .br
-\fBkcforestmgr list \fR[\fB\-onl\fR|\fB\-otl\fR|\fB\-onr\fR]\fB \fR[\fB\-des\fR]\fB \fR[\fB\-max \fInum\fB\fR]\fB \fR[\fB\-sx\fR]\fB \fR[\fB\-pv\fR]\fB \fR[\fB\-px\fR]\fB \fIpath\fB \fR[\fB\fIkey\fB\fR]\fB\fR
+\fBkcforestmgr list \fR[\fB\-onl\fR|\fB\-otl\fR|\fB\-onr\fR]\fB \fR[\fB\-des\fR]\fB \fR[\fB\-max \fInum\fB\fR]\fB \fR[\fB\-rm\fR]\fB \fR[\fB\-sx\fR]\fB \fR[\fB\-pv\fR]\fB \fR[\fB\-px\fR]\fB \fIpath\fB \fR[\fB\fIkey\fB\fR]\fB\fR
 .RS
 Prints keys of all records, separated by line feeds.
 .RE
@@ -121,6 +121,8 @@ Options feature the following.
 \fB\-incd\fR : performs real number increment operation.
 .br
 \fB\-sx\fR : the input data is evaluated as a hexadecimal data string.
+.br
+\fB\-rm\fR : removes the record.
 .br
 \fB\-px\fR : the output data is converted into a hexadecimal data string.
 .br

@@ -146,6 +146,7 @@ module kyotocabinet {
     boolean cas(in string key, in string oval, in string nval);
     boolean remove(in string key);
     string get(in string key);
+    string seize(in string key);
     long long set_bulk(in Map recs);
     long long remove_bulk(in List keys);
     Map get_bulk(in List keys);

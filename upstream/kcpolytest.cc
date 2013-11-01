@@ -1873,6 +1873,17 @@ static int32_t procwicked(const char* path, int64_t rnum, int32_t thnum, int32_t
                 break;
               }
               case 7: {
+                size_t rsiz;
+                char* rbuf = db_->seize(kbuf, ksiz, &rsiz);
+                if (rbuf) {
+                  delete[] rbuf;
+                } else if (db_->error() != kc::BasicDB::Error::NOREC) {
+                  dberrprint(db_, __LINE__, "DB::seize");
+                  err_ = true;
+                }
+                break;
+              }
+              case 8: {
                 if (myrand(10) == 0) {
                   if (myrand(4) == 0) {
                     if (!cur->jump_back(kbuf, ksiz) &&
@@ -2780,10 +2791,10 @@ static int32_t procmisc(const char* path) {
   oprintf("updating records with cursors:\n");
   for (int32_t i = 0; i < cnum; i++) {
     kc::BasicDB::Cursor* cur = curs[i];
-    switch (i % 7) {
+    switch (i % 9) {
       default: {
         size_t ksiz;
-        char* kbuf = cur->get_key(&ksiz, i % 3 == 0);
+        char* kbuf = cur->get_key(&ksiz, i % 2 == 0);
         if (kbuf) {
           std::string value;
           if (!db->get(std::string(kbuf, ksiz), &value)) {
@@ -2799,7 +2810,7 @@ static int32_t procmisc(const char* path) {
       }
       case 1: {
         size_t vsiz;
-        char* vbuf = cur->get_value(&vsiz, i % 3 == 0);
+        char* vbuf = cur->get_value(&vsiz, i % 2 == 0);
         if (vbuf) {
           delete[] vbuf;
         } else if (cur->error() != kc::BasicDB::Error::NOREC) {
@@ -2812,8 +2823,12 @@ static int32_t procmisc(const char* path) {
         size_t ksiz;
         const char* vbuf;
         size_t vsiz;
-        char* kbuf = cur->get(&ksiz, &vbuf, &vsiz, i % 3 == 0);
+        char* kbuf = cur->get(&ksiz, &vbuf, &vsiz, i % 2 == 0);
         if (kbuf) {
+          if (ksiz != vsiz || std::memcmp(kbuf, vbuf, ksiz)) {
+            dberrprint(db, __LINE__, "Cursor::get");
+            err = true;
+          }
           delete[] kbuf;
         } else if (cur->error() != kc::BasicDB::Error::NOREC) {
           dberrprint(db, __LINE__, "Cursor::get");
@@ -2822,6 +2837,19 @@ static int32_t procmisc(const char* path) {
         break;
       }
       case 3: {
+        std::string key, value;
+        if (cur->get(&key, &value, i % 2 == 0)) {
+          if (key != value) {
+            dberrprint(db, __LINE__, "Cursor::get");
+            err = true;
+          }
+        } else if (cur->error() != kc::BasicDB::Error::NOREC) {
+          dberrprint(db, __LINE__, "Cursor::get");
+          err = true;
+        }
+        break;
+      }
+      case 4: {
         char vbuf[RECBUFSIZ];
         size_t vsiz = std::sprintf(vbuf, "kyoto:%d", i);
         if (!cur->set_value(vbuf, vsiz) && cur->error() != kc::BasicDB::Error::NOREC) {
@@ -2830,9 +2858,30 @@ static int32_t procmisc(const char* path) {
         }
         break;
       }
-      case 4: {
+      case 5: {
         if (!cur->remove() && cur->error() != kc::BasicDB::Error::NOREC) {
           dberrprint(db, __LINE__, "Cursor::remove");
+          err = true;
+        }
+        break;
+      }
+      case 6: {
+        size_t ksiz;
+        const char* vbuf;
+        size_t vsiz;
+        char* kbuf = cur->seize(&ksiz, &vbuf, &vsiz);
+        if (kbuf) {
+          delete[] kbuf;
+        } else if (cur->error() != kc::BasicDB::Error::NOREC) {
+          dberrprint(db, __LINE__, "Cursor::seize");
+          err = true;
+        }
+        break;
+      }
+      case 7: {
+        std::string key, value;
+        if (!cur->seize(&key, &value) && cur->error() != kc::BasicDB::Error::NOREC) {
+          dberrprint(db, __LINE__, "Cursor::get");
           err = true;
         }
         break;

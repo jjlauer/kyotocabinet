@@ -425,6 +425,16 @@ int32_t kcdbgetbuf(KCDB* db, const char* kbuf, size_t ksiz, char* vbuf, size_t m
 
 
 /**
+ * Retrieve the value of a record and remove it atomically.
+ */
+char* kcdbseize(KCDB* db, const char* kbuf, size_t ksiz, size_t* sp) {
+  _assert_(db && kbuf && ksiz <= MEMMAXSIZ && sp);
+  PolyDB* pdb = (PolyDB*)db;
+  return pdb->seize(kbuf, ksiz, sp);
+}
+
+
+/**
  * Store records at once.
  */
 int64_t kcdbsetbulk(KCDB* db, const KCREC* recs, size_t rnum, int32_t atomic) {
@@ -811,6 +821,16 @@ char* kccurget(KCCUR* cur, size_t* ksp, const char** vbp, size_t* vsp, int32_t s
   _assert_(cur && ksp && vbp && vsp);
   PolyDB::Cursor* pcur = (PolyDB::Cursor*)cur;
   return pcur->get(ksp, vbp, vsp, step);
+}
+
+
+/**
+ * Get a pair of the key and the value of the current record and remove it atomically.
+ */
+char* kccurseize(KCCUR* cur, size_t* ksp, const char** vbp, size_t* vsp) {
+  _assert_(cur && ksp && vbp && vsp);
+  PolyDB::Cursor* pcur = (PolyDB::Cursor*)cur;
+  return pcur->seize(ksp, vbp, vsp);
 }
 
 

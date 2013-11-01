@@ -47,9 +47,9 @@ static int32_t procset(const char* path, const char* kbuf, size_t ksiz,
                        const char* vbuf, size_t vsiz, int32_t oflags, int32_t mode);
 static int32_t procremove(const char* path, const char* kbuf, size_t ksiz, int32_t oflags);
 static int32_t procget(const char* path, const char* kbuf, size_t ksiz,
-                       int32_t oflags, bool px, bool pz);
+                       int32_t oflags, bool rm, bool px, bool pz);
 static int32_t proclist(const char* path, const char*kbuf, size_t ksiz, int32_t oflags,
-                        bool des, int64_t max, bool pv, bool px);
+                        bool des, int64_t max, bool rm, bool pv, bool px);
 static int32_t procclear(const char* path, int32_t oflags);
 static int32_t procimport(const char* path, const char* file, int32_t oflags, bool sx);
 static int32_t proccopy(const char* path, const char* file, int32_t oflags);
@@ -124,8 +124,8 @@ static void usage() {
   eprintf("  %s set [-onl|-otl|-onr] [-add|-rep|-app|-inci|-incd] [-sx] path key value\n",
           g_progname);
   eprintf("  %s remove [-onl|-otl|-onr] [-sx] path key\n", g_progname);
-  eprintf("  %s get [-onl|-otl|-onr] [-sx] [-px] [-pz] path key\n", g_progname);
-  eprintf("  %s list [-onl|-otl|-onr] [-des] [-max num] [-sx] [-pv] [-px] path [key]\n",
+  eprintf("  %s get [-onl|-otl|-onr] [-rm] [-sx] [-px] [-pz] path key\n", g_progname);
+  eprintf("  %s list [-onl|-otl|-onr] [-des] [-max num] [-rm] [-sx] [-pv] [-px] path [key]\n",
           g_progname);
   eprintf("  %s clear [-onl|-otl|-onr] path\n", g_progname);
   eprintf("  %s import [-onl|-otl|-onr] [-sx] path [file]\n", g_progname);
@@ -338,6 +338,7 @@ static int32_t runget(int argc, char** argv) {
   const char* path = NULL;
   const char* kstr = NULL;
   int32_t oflags = 0;
+  bool rm = false;
   bool sx = false;
   bool px = false;
   bool pz = false;
@@ -351,6 +352,8 @@ static int32_t runget(int argc, char** argv) {
         oflags |= kc::PolyDB::OTRYLOCK;
       } else if (!std::strcmp(argv[i], "-onr")) {
         oflags |= kc::PolyDB::ONOREPAIR;
+      } else if (!std::strcmp(argv[i], "-rm")) {
+        rm = true;
       } else if (!std::strcmp(argv[i], "-sx")) {
         sx = true;
       } else if (!std::strcmp(argv[i], "-px")) {
@@ -379,7 +382,7 @@ static int32_t runget(int argc, char** argv) {
     ksiz = std::strlen(kstr);
     kbuf = NULL;
   }
-  int32_t rv = procget(path, kstr, ksiz, oflags, px, pz);
+  int32_t rv = procget(path, kstr, ksiz, oflags, rm, px, pz);
   delete[] kbuf;
   return rv;
 }
@@ -393,6 +396,7 @@ static int32_t runlist(int argc, char** argv) {
   int32_t oflags = 0;
   bool des = false;
   int64_t max = -1;
+  bool rm = false;
   bool sx = false;
   bool pv = false;
   bool px = false;
@@ -411,6 +415,8 @@ static int32_t runlist(int argc, char** argv) {
       } else if (!std::strcmp(argv[i], "-max")) {
         if (++i >= argc) usage();
         max = kc::atoix(argv[i]);
+      } else if (!std::strcmp(argv[i], "-rm")) {
+        rm = true;
       } else if (!std::strcmp(argv[i], "-sx")) {
         sx = true;
       } else if (!std::strcmp(argv[i], "-pv")) {
@@ -443,7 +449,7 @@ static int32_t runlist(int argc, char** argv) {
       kbuf[ksiz] = '\0';
     }
   }
-  int32_t rv = proclist(path, kbuf, ksiz, oflags, des, max, pv, px);
+  int32_t rv = proclist(path, kbuf, ksiz, oflags, des, max, rm, pv, px);
   delete[] kbuf;
   return rv;
 }
@@ -987,16 +993,22 @@ static int32_t procremove(const char* path, const char* kbuf, size_t ksiz, int32
 
 // perform get command
 static int32_t procget(const char* path, const char* kbuf, size_t ksiz,
-                       int32_t oflags, bool px, bool pz) {
+                       int32_t oflags, bool rm, bool px, bool pz) {
   kc::PolyDB db;
   db.tune_logger(stdlogger(g_progname, &std::cerr));
-  if (!db.open(path, kc::PolyDB::OREADER | oflags)) {
+  uint32_t omode = rm ? kc::PolyDB::OWRITER : kc::PolyDB::OREADER;
+  if (!db.open(path, omode | oflags)) {
     dberrprint(&db, "DB::open failed");
     return 1;
   }
   bool err = false;
+  char* vbuf;
   size_t vsiz;
-  char* vbuf = db.get(kbuf, ksiz, &vsiz);
+  if (rm) {
+    vbuf = db.seize(kbuf, ksiz, &vsiz);
+  } else {
+    vbuf = db.get(kbuf, ksiz, &vsiz);
+  }
   if (vbuf) {
     printdata(vbuf, vsiz, px);
     if (!pz) oprintf("\n");
@@ -1015,17 +1027,18 @@ static int32_t procget(const char* path, const char* kbuf, size_t ksiz,
 
 // perform list command
 static int32_t proclist(const char* path, const char*kbuf, size_t ksiz, int32_t oflags,
-                        bool des, int64_t max, bool pv, bool px) {
+                        bool des, int64_t max, bool rm, bool pv, bool px) {
   kc::PolyDB db;
   db.tune_logger(stdlogger(g_progname, &std::cerr));
-  if (!db.open(path, kc::PolyDB::OREADER | oflags)) {
+  uint32_t omode = rm ? kc::PolyDB::OWRITER : kc::PolyDB::OREADER;
+  if (!db.open(path, omode | oflags)) {
     dberrprint(&db, "DB::open failed");
     return 1;
   }
   bool err = false;
   class VisitorImpl : public kc::DB::Visitor {
    public:
-    explicit VisitorImpl(bool pv, bool px) : pv_(pv), px_(px) {}
+    explicit VisitorImpl(bool rm, bool pv, bool px) : rm_(rm), pv_(pv), px_(px) {}
    private:
     const char* visit_full(const char* kbuf, size_t ksiz,
                            const char* vbuf, size_t vsiz, size_t* sp) {
@@ -1035,17 +1048,18 @@ static int32_t proclist(const char* path, const char*kbuf, size_t ksiz, int32_t 
         printdata(vbuf, vsiz, px_);
       }
       oprintf("\n");
-      return NOP;
+      return rm_ ? REMOVE : NOP;
     }
+    bool rm_;
     bool pv_;
     bool px_;
-  } visitor(pv, px);
+  } visitor(rm, pv, px);
   if (kbuf || des || max >= 0) {
     if (max < 0) max = kc::INT64MAX;
     kc::PolyDB::Cursor cur(&db);
     if (des) {
       if (kbuf) {
-        if (!cur.jump(kbuf, ksiz) && db.error() != kc::BasicDB::Error::NOREC) {
+        if (!cur.jump_back(kbuf, ksiz) && db.error() != kc::BasicDB::Error::NOREC) {
           dberrprint(&db, "Cursor::jump failed");
           err = true;
         }
@@ -1056,14 +1070,13 @@ static int32_t proclist(const char* path, const char*kbuf, size_t ksiz, int32_t 
         }
       }
       while (!err && max > 0) {
-        if (!cur.accept(&visitor, false, false)) {
+        if (!cur.accept(&visitor, rm, true)) {
           if (db.error() != kc::BasicDB::Error::NOREC) {
             dberrprint(&db, "Cursor::accept failed");
             err = true;
           }
           break;
         }
-        cur.step_back();
         max--;
       }
     } else {
@@ -1079,7 +1092,7 @@ static int32_t proclist(const char* path, const char*kbuf, size_t ksiz, int32_t 
         }
       }
       while (!err && max > 0) {
-        if (!cur.accept(&visitor, false, true)) {
+        if (!cur.accept(&visitor, rm, true)) {
           if (db.error() != kc::BasicDB::Error::NOREC) {
             dberrprint(&db, "Cursor::accept failed");
             err = true;
@@ -1090,7 +1103,7 @@ static int32_t proclist(const char* path, const char*kbuf, size_t ksiz, int32_t 
       }
     }
   } else {
-    if (!db.iterate(&visitor, false)) {
+    if (!db.iterate(&visitor, rm)) {
       dberrprint(&db, "DB::iterate failed");
       err = true;
     }

@@ -1917,6 +1917,17 @@ static int32_t procwicked(const char* path, int64_t rnum, int32_t thnum, int32_t
                 break;
               }
               case 7: {
+                size_t rsiz;
+                char* rbuf = db_->seize(kbuf, ksiz, &rsiz);
+                if (rbuf) {
+                  delete[] rbuf;
+                } else if (db_->error() != kc::BasicDB::Error::NOREC) {
+                  dberrprint(db_, __LINE__, "DB::seize");
+                  err_ = true;
+                }
+                break;
+              }
+              case 8: {
                 if (myrand(10) == 0) {
                   if (!cur->jump(kbuf, ksiz) &&
                       db_->error() != kc::BasicDB::Error::NOREC) {

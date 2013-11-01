@@ -1,5 +1,15 @@
 2011-06-12  FAL Labs  <info@fallabs.com>
 
+	* kcthread.cc (TaskQueue::do_start, TaskQueue::do_finish): new functions.
+
+	* kcdb.cc (BasicDB::Curosr::seize, BasicDB::seize): new functions.
+
+	* kcplantdb.h (PlantDB::Cursor::accept_atom): backward stepping is now supported.
+
+	- Release: 1.2.63
+
+2011-06-12  FAL Labs  <info@fallabs.com>
+
 	* kcthread.cc (CondVar::wait): a bug of race condition on Win32 was fixed.
 
 	- Release: 1.2.62
