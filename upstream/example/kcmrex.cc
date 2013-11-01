@@ -23,13 +23,12 @@ int main(int argc, char** argv) {
   // define the mapper and the reducer
   class MapReduceImpl : public MapReduce {
     // call back function of the mapper
-    bool map(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz,
-             MapEmitter* emitter) {
+    bool map(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
       vector<string> words;
       strsplit(string(vbuf, vsiz), ' ', &words);
       for (vector<string>::iterator it = words.begin();
            it != words.end(); it++) {
-        emitter->emit(it->data(), it->size(), "", 0);
+        emit(it->data(), it->size(), "", 0);
       }
       return true;
     }

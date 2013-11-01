@@ -61,11 +61,20 @@ argsleepsec="$2"
 loopnum="$3"
 
 # enable libSegFault
-LD_PRELOAD="/lib/libSegFault.so"
-SEGFAULT_SIGNALS="all"
-SEGFAULT_OUTPUT_NAME="$testcmd.log"
-export LD_PRELOAD SEGFAULT_SIGNALS SEGFAULT_OUTPUT_NAME
-
+unset LD_PRELOAD
+if [ -f "/lib/libSegFault.so" ]
+then
+  LD_PRELOAD="/lib/libSegFault.so"
+elif [ -f "/lib/x86_64-linux-gnu/libSegFault.so" ]
+then
+  LD_PRELOAD="/lib/x86_64-linux-gnu/libSegFault.so"
+fi
+if [ -n "$LD_PRELOAD" ]
+then
+  SEGFAULT_SIGNALS="all"
+  SEGFAULT_OUTPUT_NAME="$testcmd.log"
+  export LD_PRELOAD SEGFAULT_SIGNALS SEGFAULT_OUTPUT_NAME
+fi
 
 # set the cleanup handler
 rm -f stop.log

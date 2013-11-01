@@ -1181,7 +1181,7 @@ const char* kcmapget(KCMAP* map, const char* kbuf, size_t ksiz, size_t* sp) {
 /**
  * Remove all records.
  */
-void kcmapclear(KCMAP* map){
+void kcmapclear(KCMAP* map) {
   _assert_(map);
   TinyHashMap* thm = (TinyHashMap*)map;
   thm->clear();

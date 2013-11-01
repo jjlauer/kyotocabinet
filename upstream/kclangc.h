@@ -21,7 +21,7 @@ extern "C" {
 #endif
 
 #if !defined(__STDC_LIMIT_MACROS)
-#define __STDC_LIMIT_MACROS  1
+#define __STDC_LIMIT_MACROS  1           /**< enable limit macros for C++ */
 #endif
 
 #include <assert.h>

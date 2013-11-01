@@ -2303,10 +2303,9 @@ static int32_t procmapred(const char* path, int64_t rnum, bool rnd, int32_t ofla
   class MapReduceImpl : public kc::MapReduce {
    public:
     MapReduceImpl() : mapcnt_(0), redcnt_(0) {}
-    bool map(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz,
-             MapEmitter* emitter) {
+    bool map(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
       mapcnt_++;
-      return emitter->emit(vbuf, vsiz, kbuf, ksiz);
+      return emit(vbuf, vsiz, kbuf, ksiz);
     }
     bool reduce(const char* kbuf, size_t ksiz, ValueIterator* iter) {
       const char* vbuf;
@@ -2318,10 +2317,14 @@ static int32_t procmapred(const char* path, int64_t rnum, bool rnd, int32_t ofla
     }
     bool preprocess() {
       oprintf("preprocessing:\n");
+      if (!emit("pre", 3, "process", 7)) return false;
+      if (!emit("PROCESS", 7, "PRE", 3)) return false;
       return true;
     }
     bool midprocess() {
       oprintf("midprocessing:\n");
+      if (!emit("mid", 3, "process", 7)) return false;
+      if (!emit("PROCESS", 7, "MID", 3)) return false;
       return true;
     }
     bool postprocess() {
@@ -2368,7 +2371,7 @@ static int32_t procmapred(const char* path, int64_t rnum, bool rnd, int32_t ofla
     dberrprint(&db, __LINE__, "MapReduce::mapcnt");
     err = true;
   }
-  if (!rnd && rnum % 100 == 0 && mr.redcnt() != rnum) {
+  if (!rnd && rnum % 100 == 0 && mr.redcnt() != rnum + 4) {
     dberrprint(&db, __LINE__, "MapReduce::redcnt");
     err = true;
   }

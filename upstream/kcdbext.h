@@ -43,7 +43,6 @@ namespace kyotocabinet {                 // common namespace
  */
 class MapReduce {
  public:
-  class MapEmitter;
   class ValueIterator;
  private:
   class MapVisitor;
@@ -67,55 +66,6 @@ class MapReduce {
   /** The page cache capacity of temprary databases. */
   static const int64_t DBPCCAP = 16LL << 20;
  public:
-  /**
-   * Data emitter for the mapper.
-   */
-  class MapEmitter {
-    friend class MapReduce;
-    friend class MapReduce::MapVisitor;
-   public:
-    /**
-     * Emit a record from the mapper.
-     * @param kbuf the pointer to the key region.
-     * @param ksiz the size of the key region.
-     * @param vbuf the pointer to the value region.
-     * @param vsiz the size of the value region.
-     * @return true on success, or false on failure.
-     */
-    bool emit(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
-      _assert_(kbuf && ksiz <= MEMMAXSIZ && vbuf && vsiz <= MEMMAXSIZ);
-      bool err = false;
-      size_t rsiz = sizevarnum(vsiz) + vsiz;
-      char stack[NUMBUFSIZ*4];
-      char* rbuf = rsiz > sizeof(stack) ? new char[rsiz] : stack;
-      char* wp = rbuf;
-      wp += writevarnum(rbuf, vsiz);
-      std::memcpy(wp, vbuf, vsiz);
-      mr_->cache_->append(kbuf, ksiz, rbuf, rsiz);
-      if (rbuf != stack) delete[] rbuf;
-      mr_->csiz_ += rsiz;
-      return !err;
-    }
-   private:
-    /**
-     * Default constructor.
-     */
-    explicit MapEmitter(MapReduce* mr) : mr_(mr) {
-      _assert_(true);
-    }
-    /**
-     * Destructor.
-     */
-    ~MapEmitter() {
-      _assert_(true);
-    }
-    /** Dummy constructor to forbid the use. */
-    MapEmitter(const MapEmitter&);
-    /** Dummy Operator to forbid the use. */
-    MapEmitter& operator =(const MapEmitter&);
-    /** The owner object. */
-    MapReduce* mr_;
-  };
   /**
    * Value iterator for the reducer.
    */
@@ -201,13 +151,11 @@ class MapReduce {
    * @param ksiz the size of the key region.
    * @param vbuf the pointer to the value region.
    * @param vsiz the size of the value region.
-   * @param emitter the emitter object.
    * @return true on success, or false on failure.
-   * @note To avoid deadlock, any explicit database operation must not be performed in this
-   * function.
+   * @note This function can call the MapReduce::emit method to emit a record.  To avoid
+   * deadlock, any explicit database operation must not be performed in this function.
    */
-  virtual bool map(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz,
-                   MapEmitter* emitter) = 0;
+  virtual bool map(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) = 0;
   /**
    * Reduce a record data.
    * @param kbuf the pointer to the key region.
@@ -221,6 +169,8 @@ class MapReduce {
   /**
    * Preprocess the map operations.
    * @return true on success, or false on failure.
+   * @note This function can call the MapReduce::emit method to emit a record.  To avoid
+   * deadlock, any explicit database operation must not be performed in this function.
    */
   virtual bool preprocess() {
     _assert_(true);
@@ -229,6 +179,8 @@ class MapReduce {
   /**
    * Mediate between the map and the reduce phases.
    * @return true on success, or false on failure.
+   * @note This function can call the MapReduce::emit method to emit a record.  To avoid
+   * deadlock, any explicit database operation must not be performed in this function.
    */
   virtual bool midprocess() {
     _assert_(true);
@@ -237,6 +189,8 @@ class MapReduce {
   /**
    * Postprocess the reduce operations.
    * @return true on success, or false on failure.
+   * @note To avoid deadlock, any explicit database operation must not be performed in this
+   * function.
    */
   virtual bool postprocess() {
     _assert_(true);
@@ -358,7 +312,7 @@ class MapReduce {
       mapvisitor.visit_before();
       if (!err) {
         BasicDB::Cursor* cur = db->cursor();
-        if (!cur->jump()) err = true;
+        if (!cur->jump() && cur->error() != BasicDB::Error::NOREC) err = true;
         while (!err) {
           if (!cur->accept(&mapvisitor, false, true)) {
             if (cur->error() != BasicDB::Error::NOREC) err = true;
@@ -413,6 +367,29 @@ class MapReduce {
     cbnum_ = cbnum > 0 ? cbnum : DEFCBNUM;
     if (cbnum_ > INT16MAX) cbnum_ = nearbyprime(cbnum_);
   }
+ protected:
+  /**
+   * Emit a record from the mapper.
+   * @param kbuf the pointer to the key region.
+   * @param ksiz the size of the key region.
+   * @param vbuf the pointer to the value region.
+   * @param vsiz the size of the value region.
+   * @return true on success, or false on failure.
+   */
+  bool emit(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
+    _assert_(kbuf && ksiz <= MEMMAXSIZ && vbuf && vsiz <= MEMMAXSIZ);
+    bool err = false;
+    size_t rsiz = sizevarnum(vsiz) + vsiz;
+    char stack[NUMBUFSIZ*4];
+    char* rbuf = rsiz > sizeof(stack) ? new char[rsiz] : stack;
+    char* wp = rbuf;
+    wp += writevarnum(rbuf, vsiz);
+    std::memcpy(wp, vbuf, vsiz);
+    cache_->append(kbuf, ksiz, rbuf, rsiz);
+    if (rbuf != stack) delete[] rbuf;
+    csiz_ += rsiz;
+    return !err;
+  }
  private:
   /**
    * Checker for the map process.
@@ -443,30 +420,31 @@ class MapReduce {
    public:
     /** constructor */
     explicit MapVisitor(MapReduce* mr, MapChecker* checker, int64_t scale) :
-        mr_(mr), checker_(checker), emitter_(mr), scale_(scale),
-        stime_(0), err_(false) {}
+        mr_(mr), checker_(checker), scale_(scale), stime_(0), err_(false) {}
     /** get the error flag */
     bool error() {
       return err_;
     }
     /** preprocess the mappter */
     void visit_before() {
-      if (!mr_->preprocess()) err_ = true;
-      stime_ = time();
       mr_->dbclock_ = 0;
       mr_->cache_ = new TinyHashMap(mr_->cbnum_);
       mr_->csiz_ = 0;
+      if (!mr_->preprocess()) err_ = true;
+      if (mr_->cache_->count() > 0 && !mr_->flush_cache()) err_ = true;
       if (!mr_->logf("map", "started the map process: scale=%lld", (long long)scale_))
         err_ = true;
+      stime_ = time();
     }
     /** postprocess the mappter and call the reducer */
     void visit_after() {
       if (mr_->cache_->count() > 0 && !mr_->flush_cache()) err_ = true;
-      delete mr_->cache_;
       double etime = time();
       if (!mr_->logf("map", "the map process finished: time=%.6f", etime - stime_))
         err_ = true;
       if (!mr_->midprocess()) err_ = true;
+      if (mr_->cache_->count() > 0 && !mr_->flush_cache()) err_ = true;
+      delete mr_->cache_;
       if (!err_ && !mr_->execute_reduce()) err_ = true;
       if (!mr_->postprocess()) err_ = true;
     }
@@ -474,7 +452,7 @@ class MapReduce {
     /** visit a record */
     const char* visit_full(const char* kbuf, size_t ksiz,
                            const char* vbuf, size_t vsiz, size_t* sp) {
-      if (!mr_->map(kbuf, ksiz, vbuf, vsiz, &emitter_)) {
+      if (!mr_->map(kbuf, ksiz, vbuf, vsiz)) {
         checker_->stop();
         err_ = true;
       }
@@ -486,7 +464,6 @@ class MapReduce {
     }
     MapReduce* mr_;                      ///< driver
     MapChecker* checker_;                ///< checker
-    MapEmitter emitter_;                 ///< emitter
     int64_t scale_;                      ///< number of records
     double stime_;                       ///< start time
     bool err_;                           ///< error flag
@@ -1109,6 +1086,7 @@ class IndexDB {
     ScopedRWLock lock(&mlock_, false);
     if (omode_ == 0) {
       set_error(_KCCODELINE_, BasicDB::Error::INVALID, "not opened");
+      *sp = 0;
       return false;
     }
     if (!cache_) return db_.get(kbuf, ksiz, sp);
@@ -1137,7 +1115,10 @@ class IndexDB {
     }
     if (!hit) {
       delete[] recs;
-      if (!dvbuf && !cvbuf) return NULL;
+      if (!dvbuf && !cvbuf) {
+        *sp = 0;
+        return NULL;
+      }
       if (!dvbuf) {
         dvbuf = new char[cvsiz+1];
         std::memcpy(dvbuf, cvbuf, cvsiz);

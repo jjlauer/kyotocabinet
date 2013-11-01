@@ -1,3 +1,13 @@
+2011-05-01  FAL Labs  <info@fallabs.com>
+
+	* kcdbext.h (MapReduce::map): MapEmitter was integrated.
+
+	* kcdbext.h (MapReduce::emit): new function.
+
+	* kcdbext.h (MapReduce::execute): a bug of wrong handling of empty databases was fixed.
+
+	- Release: 1.2.53
+
 2011-04-10  FAL Labs  <info@fallabs.com>
 
 	* kcutil.h (OSNAME, PAGESIZ): renamed for portability to Solaris.

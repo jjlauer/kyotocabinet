@@ -1349,7 +1349,7 @@ class PolyDB : public BasicDB {
     _assert_(file && line > 0 && func && message);
     if (logger_) {
       logger_->log(file, line, func, kind, message);
-    } else if(type_ != TYPEVOID) {
+    } else if (type_ != TYPEVOID) {
       db_->log(file, line, func, kind, message);
     }
   }
