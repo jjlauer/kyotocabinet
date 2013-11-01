@@ -1593,7 +1593,7 @@ class PolyDB : public BasicDB {
   struct SimilarKey {
     size_t dist;
     std::string key;
-    uint32_t order;
+    int64_t order;
     bool operator <(const SimilarKey& right) const {
       if (dist != right.dist) return dist < right.dist;
       if (key != right.key) return key < right.key;

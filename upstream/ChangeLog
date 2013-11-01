@@ -1,3 +1,9 @@
+2012-03-15  FAL Labs  <info@fallabs.com>
+
+	* kcpolydb.h (PolyDB::SimilarKey): the type of a member was modified for c++0x mode.
+
+	- Release: 1.2.74
+
 2012-03-06  FAL Labs  <info@fallabs.com>
 
 	* kcutil.h (memdist, strutfdist, strucsdist): new functions.
