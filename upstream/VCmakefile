@@ -667,7 +667,7 @@ check-poly :
 	kcpolytest mapred -dbnum 2 -clim 10k casket.kct 10000
 	kcpolytest mapred -tmp . -dbnum 2 -clim 10k -xnl -xnc \
 	  casket.kct 10000
-	kcpolytest mapred -tmp . -dbnum 2 -clim 10k -xpm -xpr -xnc \
+	kcpolytest mapred -tmp . -dbnum 2 -clim 10k -xpm -xpr -xpf -xnc \
 	  casket.kct 10000
 	kcpolytest mapred -rnd -dbnum 2 -clim 10k casket.kct 10000
 	kcpolytest index -set "casket.kct#idxclim=32k" 10000

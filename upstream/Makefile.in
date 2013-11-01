@@ -764,7 +764,7 @@ check-poly :
 	$(RUNENV) $(RUNCMD) ./kcpolytest mapred -dbnum 2 -clim 10k casket.kct 10000
 	$(RUNENV) $(RUNCMD) ./kcpolytest mapred -tmp . -dbnum 2 -clim 10k -xnl -xnc \
 	  casket.kct 10000
-	$(RUNENV) $(RUNCMD) ./kcpolytest mapred -tmp . -dbnum 2 -clim 10k -xpm -xpr -xnc \
+	$(RUNENV) $(RUNCMD) ./kcpolytest mapred -tmp . -dbnum 2 -clim 10k -xpm -xpr -xpf -xnc \
 	  casket.kct 10000
 	$(RUNENV) $(RUNCMD) ./kcpolytest mapred -rnd -dbnum 2 -clim 10k casket.kct 10000
 	$(RUNENV) $(RUNCMD) ./kcpolytest index -set "casket.kct#idxclim=32k" 10000

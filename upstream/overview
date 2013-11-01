@@ -30,6 +30,9 @@ The following classes are most important.  If you are new to Kyoto Cabinet, lear
 @li kyotocabinet::ForestDB -- directory tree database, which implements B+ tree on a directory
 @li kyotocabinet::PolyDB -- polymorphic database, dynamic binding of the above databases
 
+@li kyotocabinet::MapReduce -- MapReduce framework to process records in each database
+@li kyotocabinet::IndexDB -- wrapper for efficient appending operations to each database
+
 @li kclangc.h -- C language binding of the polymorphic database
 
 See the project homepage ( http://fallabs.com/kyotocabinet/ ) for details.

@@ -751,7 +751,6 @@ class TinyHashMap {
      */
     explicit Sorter(TinyHashMap* map) : map_(map), ridx_(0), recs_() {
       _assert_(map);
-      recs_.reserve(map->count_);
       char** buckets = map_->buckets_;
       size_t bnum = map_->bnum_;
       for (size_t i = 0; i < bnum; i++) {
@@ -1061,6 +1060,16 @@ class TinyHashMap {
     _assert_(true);
     return count_;
   }
+  /**
+   * Get the hash value of a record.
+   * @param kbuf the pointer to the key region.
+   * @param ksiz the size of the key region.
+   * @return the hash value.
+   */
+  static size_t hash_record(const char* kbuf, size_t ksiz) {
+    _assert_(kbuf && ksiz <= MEMMAXSIZ);
+    return hashmurmur(kbuf, ksiz);
+  }
  private:
   /**
    * Record data.
@@ -1208,16 +1217,6 @@ class TinyHashMap {
     } else {
       delete[] buckets_;
     }
-  }
-  /**
-   * Get the hash value of a record.
-   * @param kbuf the pointer to the key region.
-   * @param ksiz the size of the key region.
-   * @return the hash value.
-   */
-  size_t hash_record(const char* kbuf, size_t ksiz) {
-    _assert_(kbuf && ksiz <= MEMMAXSIZ);
-    return hashmurmur(kbuf, ksiz);
   }
   /** Dummy constructor to forbid the use. */
   TinyHashMap(const TinyHashMap&);

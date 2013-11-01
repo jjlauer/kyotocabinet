@@ -2249,7 +2249,7 @@ class HashDB : public BasicDB {
    * @return true on success, or false on failure.
    */
   bool scan_parallel_impl(Visitor *visitor, size_t thnum, ProgressChecker* checker) {
-    assert(visitor && thnum <= MEMMAXSIZ);
+    _assert_(visitor && thnum <= MEMMAXSIZ);
     int64_t allcnt = count_;
     if (checker && !checker->check("scan_parallel", "beginning", -1, allcnt)) {
       set_error(_KCCODELINE_, Error::LOGIC, "checker failed");

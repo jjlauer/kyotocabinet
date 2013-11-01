@@ -45,6 +45,8 @@ class MapReduce {
  public:
   class ValueIterator;
  private:
+  class FlushThread;
+  class ReduceTaskQueue;
   class MapVisitor;
   struct MergeLine;
   /** An alias of vector of loaded values. */
@@ -67,6 +69,8 @@ class MapReduce {
   static const int64_t DBPCCAP = 16LL << 20;
   /** The default number of threads in parallel mode. */
   static const size_t DEFTHNUM = 8;
+  /** The number of slots of the record lock. */
+  static const int32_t RLOCKSLOT = 256;
  public:
   /**
    * Value iterator for the reducer.
@@ -133,6 +137,7 @@ class MapReduce {
     XNOLOCK = 1 << 0,                    ///< avoid locking against update operations
     XPARAMAP = 1 << 1,                   ///< run mappers in parallel
     XPARARED = 1 << 2,                   ///< run reducers in parallel
+    XPARAFLS = 1 << 3,                   ///< run cache flushers in parallel
     XNOCOMP = 1 << 8                     ///< avoid compression of temporary databases
   };
   /**
@@ -140,9 +145,9 @@ class MapReduce {
    */
   explicit MapReduce() :
       db_(NULL), rcomp_(NULL), tmpdbs_(NULL), dbnum_(DEFDBNUM), dbclock_(0),
-      mapthnum_(DEFTHNUM), redthnum_(DEFTHNUM),
-      cache_(NULL), csiz_(0), clim_(DEFCLIM), cbnum_(DEFCBNUM),
-      redtasks_(NULL), redaborted_(false), lock_(NULL) {
+      mapthnum_(DEFTHNUM), redthnum_(DEFTHNUM), flsthnum_(DEFTHNUM),
+      cache_(NULL), csiz_(0), clim_(DEFCLIM), cbnum_(DEFCBNUM), flsths_(NULL),
+      redtasks_(NULL), redaborted_(false), rlocks_(NULL) {
     _assert_(true);
   }
   /**
@@ -314,6 +319,7 @@ class MapReduce {
       }
     }
     if (opts & XPARARED) redtasks_ = new ReduceTaskQueue;
+    if (opts & XPARAFLS) flsths_ = new std::deque<FlushThread*>;
     if (opts & XNOLOCK) {
       MapChecker mapchecker;
       MapVisitor mapvisitor(this, &mapchecker, db->count());
@@ -337,13 +343,13 @@ class MapReduce {
     } else if (opts & XPARAMAP) {
       MapChecker mapchecker;
       MapVisitor mapvisitor(this, &mapchecker, db->count());
-      lock_ = new Mutex();
+      rlocks_ = new SlottedMutex(RLOCKSLOT);
       if (!err && !db->scan_parallel(&mapvisitor, mapthnum_, &mapchecker)) {
         db_->set_error(_KCCODELINE_, BasicDB::Error::LOGIC, "mapper failed");
         err = true;
       }
-      delete lock_;
-      lock_ = NULL;
+      delete rlocks_;
+      rlocks_ = NULL;
       if (mapvisitor.error()) err = true;
     } else {
       MapChecker mapchecker;
@@ -354,6 +360,10 @@ class MapReduce {
         err = true;
       }
     }
+    if (flsths_) {
+      delete flsths_;
+      flsths_ = NULL;
+    }
     if (redtasks_) {
       delete redtasks_;
       redtasks_ = NULL;
@@ -361,7 +371,6 @@ class MapReduce {
     if (!logf("clean", "closing the temporary databases")) err = true;
     stime = time();
     for (size_t i = 0; i < dbnum_; i++) {
-      assert(tmpdbs_[i]);
       const std::string& path = tmpdbs_[i]->path();
       if (!tmpdbs_[i]->clear()) {
         const BasicDB::Error& e = tmpdbs_[i]->error();
@@ -400,11 +409,13 @@ class MapReduce {
    * Set the thread configurations.
    * @param mapthnum the number of threads for the mapper.
    * @param redthnum the number of threads for the reducer.
+   * @param flsthnum the number of threads for the internal flusher.
    */
-  void tune_thread(int32_t mapthnum, int32_t redthnum) {
+  void tune_thread(int32_t mapthnum, int32_t redthnum, int32_t flsthnum) {
     _assert_(true);
     mapthnum_ = mapthnum > 0 ? mapthnum : DEFTHNUM;
     redthnum_ = redthnum > 0 ? redthnum : DEFTHNUM;
+    flsthnum_ = flsthnum > 0 ? flsthnum : DEFTHNUM;
   }
  protected:
   /**
@@ -424,10 +435,12 @@ class MapReduce {
     char* wp = rbuf;
     wp += writevarnum(rbuf, vsiz);
     std::memcpy(wp, vbuf, vsiz);
-    if (lock_) {
-      lock_->lock();
+    if (rlocks_) {
+      size_t bidx = TinyHashMap::hash_record(kbuf, ksiz) % cbnum_;
+      size_t lidx = bidx % RLOCKSLOT;
+      rlocks_->lock(lidx);
       cache_->append(kbuf, ksiz, rbuf, rsiz);
-      lock_->unlock();
+      rlocks_->unlock(lidx);
     } else {
       cache_->append(kbuf, ksiz, rbuf, rsiz);
     }
@@ -436,6 +449,52 @@ class MapReduce {
     return !err;
   }
  private:
+  /**
+   * Cache flusher.
+   */
+  class FlushThread : public Thread {
+   public:
+    /** constructor */
+    explicit FlushThread(MapReduce* mr, BasicDB* tmpdb,
+                         TinyHashMap* cache, size_t csiz, bool cown) :
+        mr_(mr), tmpdb_(tmpdb), cache_(cache), csiz_(csiz), cown_(cown), err_(false) {}
+    /** perform the concrete process */
+    void run() {
+      if (!mr_->logf("map", "started to flushing the cache: count=%lld size=%lld",
+                     (long long)cache_->count(), (long long)csiz_)) err_ = true;
+      double stime = time();
+      BasicDB* tmpdb = tmpdb_;
+      TinyHashMap* cache = cache_;
+      bool cown = cown_;
+      TinyHashMap::Sorter sorter(cache);
+      const char* kbuf, *vbuf;
+      size_t ksiz, vsiz;
+      while ((kbuf = sorter.get(&ksiz, &vbuf, &vsiz)) != NULL) {
+        if (!tmpdb->append(kbuf, ksiz, vbuf, vsiz)) {
+          const BasicDB::Error& e = tmpdb->error();
+          mr_->db_->set_error(_KCCODELINE_, e.code(), e.message());
+          err_ = true;
+        }
+        sorter.step();
+        if (cown) cache->remove(kbuf, ksiz);
+      }
+      double etime = time();
+      if (!mr_->logf("map", "flushing the cache finished: time=%.6f", etime - stime))
+        err_ = true;
+      if (cown) delete cache;
+    }
+    /** check the error flag. */
+    bool error() {
+      return err_;
+    }
+   private:
+    MapReduce* mr_;                          ///< driver
+    BasicDB* tmpdb_;                         ///< temprary database
+    TinyHashMap* cache_;                     ///< cache for emitter
+    size_t csiz_;                            ///< current cache size
+    bool cown_;                              ///< cache ownership flag
+    bool err_;                               ///< error flag
+  };
   /**
    * Task queue for parallel reducer.
    */
@@ -507,20 +566,31 @@ class MapReduce {
       mr_->cache_ = new TinyHashMap(mr_->cbnum_);
       mr_->csiz_ = 0;
       if (!mr_->preprocess()) err_ = true;
-      if (mr_->cache_->count() > 0 && !mr_->flush_cache()) err_ = true;
+      if (mr_->csiz_ > 0 && !mr_->flush_cache()) err_ = true;
       if (!mr_->logf("map", "started the map process: scale=%lld", (long long)scale_))
         err_ = true;
       stime_ = time();
     }
     /** postprocess the mappter and call the reducer */
     void visit_after() {
-      if (mr_->cache_->count() > 0 && !mr_->flush_cache()) err_ = true;
+      if (mr_->csiz_ > 0 && !mr_->flush_cache()) err_ = true;
       double etime = time();
       if (!mr_->logf("map", "the map process finished: time=%.6f", etime - stime_))
         err_ = true;
       if (!mr_->midprocess()) err_ = true;
-      if (mr_->cache_->count() > 0 && !mr_->flush_cache()) err_ = true;
+      if (mr_->csiz_ > 0 && !mr_->flush_cache()) err_ = true;
       delete mr_->cache_;
+      if (mr_->flsths_ && !mr_->flsths_->empty()) {
+        std::deque<FlushThread*>::iterator flthit = mr_->flsths_->begin();
+        std::deque<FlushThread*>::iterator flthitend = mr_->flsths_->end();
+        while (flthit != flthitend) {
+          FlushThread* flth = *flthit;
+          flth->join();
+          if (flth->error()) err_ = true;
+          delete flth;
+          ++flthit;
+        }
+      }
       if (!err_ && !mr_->execute_reduce()) err_ = true;
       if (!mr_->postprocess()) err_ = true;
     }
@@ -532,13 +602,15 @@ class MapReduce {
         checker_->stop();
         err_ = true;
       }
-      if (mr_->lock_) {
-        mr_->lock_->lock();
-        if (mr_->csiz_ >= mr_->clim_ && !mr_->flush_cache()) {
-          checker_->stop();
-          err_ = true;
+      if (mr_->rlocks_) {
+        if (mr_->csiz_ >= mr_->clim_) {
+          mr_->rlocks_->lock_all();
+          if (mr_->csiz_ >= mr_->clim_ && !mr_->flush_cache()) {
+            checker_->stop();
+            err_ = true;
+          }
+          mr_->rlocks_->unlock_all();
         }
-        mr_->lock_->unlock();
       } else {
         if (mr_->csiz_ >= mr_->clim_ && !mr_->flush_cache()) {
           checker_->stop();
@@ -591,26 +663,29 @@ class MapReduce {
   bool flush_cache() {
     _assert_(true);
     bool err = false;
-    if (!logf("map", "started to flushing the cache: count=%lld size=%lld",
-              (long long)cache_->count(), (long long)csiz_)) err = true;
-    double stime = time();
     BasicDB* tmpdb = tmpdbs_[dbclock_];
-    TinyHashMap::Sorter sorter(cache_);
-    const char* kbuf, *vbuf;
-    size_t ksiz, vsiz;
-    while ((kbuf = sorter.get(&ksiz, &vbuf, &vsiz)) != NULL) {
-      if (!tmpdb->append(kbuf, ksiz, vbuf, vsiz)) {
-        const BasicDB::Error& e = tmpdb->error();
-        db_->set_error(_KCCODELINE_, e.code(), e.message());
-        err = true;
-      }
-      sorter.step();
-    }
-    cache_->clear();
-    csiz_ = 0;
     dbclock_ = (dbclock_ + 1) % dbnum_;
-    double etime = time();
-    if (!logf("map", "flushing the cache finished: time=%.6f", etime - stime)) err = true;
+    if (flsths_) {
+      size_t num = flsths_->size();
+      if (num >= flsthnum_ || num >= dbnum_) {
+        FlushThread* flth = flsths_->front();
+        flsths_->pop_front();
+        flth->join();
+        if (flth->error()) err = true;
+        delete flth;
+      }
+      FlushThread* flth = new FlushThread(this, tmpdb, cache_, csiz_, true);
+      cache_ = new TinyHashMap(cbnum_);
+      csiz_ = 0;
+      flth->start();
+      flsths_->push_back(flth);
+    } else {
+      FlushThread flth(this, tmpdb, cache_, csiz_, false);
+      flth.run();
+      if (flth.error()) err = true;
+      cache_->clear();
+      csiz_ = 0;
+    }
     return !err;
   }
   /**
@@ -720,20 +795,24 @@ class MapReduce {
   size_t mapthnum_;
   /** The number of the reducer threads. */
   size_t redthnum_;
+  /** The number of the flusher threads. */
+  size_t flsthnum_;
   /** The cache for emitter. */
   TinyHashMap* cache_;
   /** The current size of the cache for emitter. */
-  int64_t csiz_;
+  AtomicInt64 csiz_;
   /** The limit size of the cache for emitter. */
   int64_t clim_;
   /** The bucket number of the cache for emitter. */
   int64_t cbnum_;
+  /** The flush threads. */
+  std::deque<FlushThread*>* flsths_;
   /** The task queue for parallel reducer. */
   TaskQueue* redtasks_;
   /** The flag whether aborted. */
   bool redaborted_;
   /** The whole lock. */
-  Mutex* lock_;
+  SlottedMutex* rlocks_;
 };
 
 
