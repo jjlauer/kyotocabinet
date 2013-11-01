@@ -1,3 +1,9 @@
+2011-07-01  FAL Labs  <info@fallabs.com>
+
+	* kcutil.h (strutftoucs, strucstoutf): new functions.
+
+	- Release: 1.2.66
+
 2011-06-28  FAL Labs  <info@fallabs.com>
 
 	* kcutil.h (urlencode): modified for compatibility with RFC 3986.

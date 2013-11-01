@@ -395,6 +395,22 @@ size_t strsplit(const std::string& str, const std::string& delims,
 
 
 /**
+ * Convert a UTF-8 string into a UCS-4 vector.
+ * @param src the source object.
+ * @param dest the destination object.
+ */
+void strutftoucs(const std::string& src, std::vector<uint32_t>* dest);
+
+
+/**
+ * Convert a UCS-4 vector into a UTF-8 string.
+ * @param src the source object.
+ * @param dest the destination object.
+ */
+void strucstoutf(const std::vector<uint32_t>& src, std::string* dest);
+
+
+/**
  * Serialize a string vector object into a string object.
  * @param src the source object.
  * @param dest the destination object.
@@ -404,8 +420,8 @@ void strvecdump(const std::vector<std::string>& src, std::string* dest);
 
 /**
  * Deserialize a string object into a string vector object.
- * @param src the destination object.
- * @param dest the source object.
+ * @param src the source object.
+ * @param dest the destination object.
  */
 void strvecload(const std::string& src, std::vector<std::string>* dest);
 
@@ -420,8 +436,8 @@ void strmapdump(const std::map<std::string, std::string>& src, std::string* dest
 
 /**
  * Deserialize a string object into a string map object.
- * @param src the destination object.
- * @param dest the source object.
+ * @param src the source object.
+ * @param dest the destination object.
  */
 void strmapload(const std::string& src, std::map<std::string, std::string>* dest);
 
@@ -1548,6 +1564,93 @@ inline size_t strsplit(const std::string& str, const std::string& delims,
   std::string col(pv, it);
   elems->push_back(col);
   return elems->size();
+}
+
+
+/**
+ * Convert a UTF-8 string into a UCS-4 vector.
+ */
+inline void strutftoucs(const std::string& src, std::vector<uint32_t>* dest) {
+  _assert_(dest);
+  const unsigned char* rp = (unsigned char*)src.c_str();
+  while (*rp != '\0') {
+    uint32_t c = *(unsigned char*)rp;
+    if (c < 0x80) {
+      dest->push_back(c);
+    } else if (c < 0xe0) {
+      if (rp[1] >= 0x80) {
+        dest->push_back(((rp[0] & 0x1f) << 6) | (rp[1] & 0x3f));
+        rp++;
+      }
+    } else if (c < 0xf0) {
+      if (rp[1] >= 0x80 && rp[2] >= 0x80) {
+        dest->push_back(((rp[0] & 0x0f) << 12) | ((rp[1] & 0x3f) << 6) | (rp[2] & 0x3f));
+        rp += 2;
+      }
+    } else if (c < 0xf8) {
+      if (rp[1] >= 0x80 && rp[2] >= 0x80 && rp[3] >= 0x80) {
+        dest->push_back(((rp[0] & 0x07) << 18) | ((rp[1] & 0x3f) << 12) |
+                        ((rp[2] & 0x3f) << 6) | (rp[3] & 0x3f));
+        rp += 3;
+      }
+    } else if (c < 0xfc) {
+      if (rp[1] >= 0x80 && rp[2] >= 0x80 && rp[3] >= 0x80 && rp[4] >= 0x80) {
+        dest->push_back(((rp[0] & 0x03) << 24) | ((rp[1] & 0x3f) << 18) |
+                        ((rp[2] & 0x3f) << 12) | ((rp[3] & 0x3f) << 6) | (rp[4] & 0x3f));
+        rp += 4;
+      }
+    } else if (c < 0xfe) {
+      if (rp[1] >= 0x80 && rp[2] >= 0x80 && rp[3] >= 0x80 && rp[4] >= 0x80 && rp[4] >= 0x80) {
+        dest->push_back(((rp[0] & 0x01) << 30) | ((rp[1] & 0x3f) << 24) |
+                        ((rp[2] & 0x3f) << 18) | ((rp[3] & 0x3f) << 12) |
+                        ((rp[4] & 0x3f) << 6) | (rp[5] & 0x3f));
+        rp += 5;
+      }
+    }
+    rp++;
+  }
+}
+
+
+/**
+ * Convert a UCS-4 array into a UTF-8 string.
+ */
+inline void strucstoutf(const std::vector<uint32_t>& src, std::string* dest) {
+  _assert_(dest);
+  std::vector<uint32_t>::const_iterator it = src.begin();
+  std::vector<uint32_t>::const_iterator itend = src.end();
+  while (it != itend) {
+    uint32_t c = *it;
+    if (c < 0x80) {
+      dest->append(1, c);
+    } else if (c < 0x800) {
+      dest->append(1, 0xc0 | (c >> 6));
+      dest->append(1, 0x80 | (c & 0x3f));
+    } else if (c < 0x10000) {
+      dest->append(1, 0xe0 | (c >> 12));
+      dest->append(1, 0x80 | ((c & 0xfff) >> 6));
+      dest->append(1, 0x80 | (c & 0x3f));
+    } else if (c < 0x200000) {
+      dest->append(1, 0xf0 | (c >> 18));
+      dest->append(1, 0x80 | ((c & 0x3ffff) >> 12));
+      dest->append(1, 0x80 | ((c & 0xfff) >> 6));
+      dest->append(1, 0x80 | (c & 0x3f));
+    } else if (c < 0x4000000) {
+      dest->append(1, 0xf8 | (c >> 24));
+      dest->append(1, 0x80 | ((c & 0xffffff) >> 18));
+      dest->append(1, 0x80 | ((c & 0x3ffff) >> 12));
+      dest->append(1, 0x80 | ((c & 0xfff) >> 6));
+      dest->append(1, 0x80 | (c & 0x3f));
+    } else if (c < 0x80000000) {
+      dest->append(1, 0xfc | (c >> 30));
+      dest->append(1, 0x80 | ((c & 0x3fffffff) >> 24));
+      dest->append(1, 0x80 | ((c & 0xffffff) >> 18));
+      dest->append(1, 0x80 | ((c & 0x3ffff) >> 12));
+      dest->append(1, 0x80 | ((c & 0xfff) >> 6));
+      dest->append(1, 0x80 | (c & 0x3f));
+    }
+    ++it;
+  }
 }
 
 

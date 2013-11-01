@@ -2553,6 +2553,28 @@ static int32_t procmisc(int64_t rnum) {
     hash += kc::hashpath(ubuf, usiz, name);
     hash = kc::nearbyprime(myrand(kc::INT32MAX));
     if (myrand(256) == 0) {
+      int32_t unum = myrand(64);
+      std::vector<uint32_t> oucs;
+      for (int32_t j = 0; j < unum; j++) {
+        uint32_t c = std::pow(2, myrand(310000) / 10000.0);
+        if (c > 0 && c < (uint32_t)kc::INT32MAX) oucs.push_back(c);
+      }
+      std::string utf;
+      kc::strucstoutf(oucs, &utf);
+      std::vector<uint32_t> nucs;
+      kc::strutftoucs(utf, &nucs);
+      if (nucs.size() == oucs.size()) {
+        for (int32_t j = 0; j < (int32_t)nucs.size(); j++) {
+          if (nucs[j] != oucs[j]) {
+            errprint(__LINE__, "strutftoucs: %d:%d", (int)nucs[j], (int)oucs[j]);
+            err = true;
+            break;
+          }
+        }
+      } else {
+        errprint(__LINE__, "strutftoucs: %d:%d", (int)nucs.size(), (int)oucs.size());
+        err = true;
+      }
       int32_t tnum = myrand(64);
       std::vector<std::string> ovec;
       std::map<std::string, std::string> omap;
@@ -2569,7 +2591,7 @@ static int32_t procmisc(int64_t rnum) {
       std::vector<std::string> nvec;
       kc::strvecload(vstr, &nvec);
       if (nvec.size() != ovec.size()) {
-        errprint(__LINE__, "strvecload: %llu:%llu", nvec.size(), ovec.size());
+        errprint(__LINE__, "strvecload: %d:%d", (int)nvec.size(), (int)ovec.size());
         err = true;
       }
       std::string mstr;
@@ -2577,7 +2599,7 @@ static int32_t procmisc(int64_t rnum) {
       std::map<std::string, std::string> nmap;
       kc::strmapload(mstr, &nmap);
       if (nmap.size() != omap.size()) {
-        errprint(__LINE__, "strmapload: %llu:%llu", nvec.size(), ovec.size());
+        errprint(__LINE__, "strmapload: %d:%d", (int)nvec.size(), (int)ovec.size());
         err = true;
       }
     }

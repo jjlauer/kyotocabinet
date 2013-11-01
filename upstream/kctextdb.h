@@ -1078,7 +1078,8 @@ class TextDB : public BasicDB {
                 char kbuf[NUMBUFSIZ];
                 size_t ksiz = std::sprintf(kbuf, "%020lld", (long long)(off + pv - stack));
                 size_t vsiz;
-                const char* vbuf = visitor->visit_full(kbuf, ksiz, line.data(), line.size(), &vsiz);
+                const char* vbuf = visitor->visit_full(kbuf, ksiz, line.data(), line.size(),
+                                                       &vsiz);
                 if (vbuf != Visitor::NOP && vbuf != Visitor::REMOVE) {
                   char tstack[IOBUFSIZ];
                   size_t trsiz = vsiz + 1;
