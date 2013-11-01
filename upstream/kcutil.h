@@ -395,6 +395,30 @@ size_t strsplit(const std::string& str, const std::string& delims,
 
 
 /**
+ * Convert the letters of a string into upper case.
+ * @param str the string to convert.
+ * @return the string itself.
+ */
+std::string* strtoupper(std::string* str);
+
+
+/**
+ * Convert the letters of a string into lower case.
+ * @param str the string to convert.
+ * @return the string itself.
+ */
+std::string* strtolower(std::string* str);
+
+
+/**
+ * Cut space characters at head or tail of a string.
+ * @param str the string to convert.
+ * @return the string itself.
+ */
+std::string* strtrim(std::string* str);
+
+
+/**
  * Convert a UTF-8 string into a UCS-4 vector.
  * @param src the source object.
  * @param dest the destination object.
@@ -566,6 +590,41 @@ char* memdup(const char* ptr, size_t size);
 
 
 /**
+ * Compare two regions by case insensitive evaluation.
+ * @param abuf a buffer.
+ * @param bbuf the other buffer.
+ * @param size the size of each buffer.
+ * @return positive if the former is big, negative if the latter is big, 0 if both are
+ * equivalent.
+ */
+int32_t memicmp(const void* abuf, const void* bbuf, size_t size);
+
+
+/**
+ * Find the first occurrence of a sub pattern.
+ * @param hbuf the target pattern buffer.
+ * @param hsiz the size of the target pattern buffer.
+ * @param nbuf the sub pattern buffer.
+ * @param nsiz the size of the sub pattern buffer.
+ * @return the pointer to the beginning of the sub pattern in the target pattern buffer, or NULL
+ * if the sub pattern is not found.
+ */
+void* memmem(const void* hbuf, size_t hsiz, const void* nbuf, size_t nsiz);
+
+
+/**
+ * Find the first occurrence of a sub pattern by case insensitive evaluation.
+ * @param hbuf the target pattern buffer.
+ * @param hsiz the size of the target pattern buffer.
+ * @param nbuf the sub pattern buffer.
+ * @param nsiz the size of the sub pattern buffer.
+ * @return the pointer to the beginning of the sub pattern in the target pattern buffer, or NULL
+ * if the sub pattern is not found.
+ */
+void* memimem(const void* hbuf, size_t hsiz, const void* nbuf, size_t nsiz);
+
+
+/**
  * Duplicate a string on memory.
  * @param str the source string.
  * @note Because the region of the return value is allocated with the the new[] operator, it
@@ -615,13 +674,23 @@ char* strnrmspc(char* str);
 
 
 /**
- * Compare two strings with case insensitive evaluation.
+ * Compare two strings by case insensitive evaluation.
  * @param astr a string.
  * @param bstr the other string.
  * @return positive if the former is big, negative if the latter is big, 0 if both are
  * equivalent.
  */
 int32_t stricmp(const char* astr, const char* bstr);
+
+
+/**
+ * Find the first occurrence of a substring by case insensitive evaluation.
+ * @param hstr the target string.
+ * @param nstr the substring.
+ * @return the pointer to the beginning of the substring in the target string, or NULL if the
+ * substring is not found.
+ */
+char* stristr(const char* hstr, const char* nstr);
 
 
 /**
@@ -1568,6 +1637,56 @@ inline size_t strsplit(const std::string& str, const std::string& delims,
 
 
 /**
+ * Convert the letters of a string into upper case.
+ */
+inline std::string* strtoupper(std::string* str) {
+  _assert_(str);
+  size_t size = str->size();
+  for (size_t i = 0; i < size; i++) {
+    int32_t c = (unsigned char)(*str)[i];
+    if (c >= 'a' && c <= 'z') (*str)[i] = c - ('a' - 'A');
+  }
+  return str;
+}
+
+
+/**
+ * Convert the letters of a string into lower case.
+ */
+inline std::string* strtolower(std::string* str) {
+  _assert_(str);
+  size_t size = str->size();
+  for (size_t i = 0; i < size; i++) {
+    int32_t c = (unsigned char)(*str)[i];
+    if (c >= 'A' && c <= 'Z') (*str)[i] = c + ('a' - 'A');
+  }
+  return str;
+}
+
+
+/**
+ * Cut space characters at head or tail of a string.
+ */
+inline std::string* strtrim(std::string* str) {
+  _assert_(str);
+  size_t size = str->size();
+  size_t wi = 0;
+  size_t li = 0;
+  for (size_t i = 0; i < size; i++) {
+    int32_t c = (unsigned char)(*str)[i];
+    if (c >= '\0' && c <= ' ') {
+      if (wi > 0) (*str)[wi++] = c;
+    } else {
+      (*str)[wi++] = c;
+      li = wi;
+    }
+  }
+  str->resize(li);
+  return str;
+}
+
+
+/**
  * Convert a UTF-8 string into a UCS-4 vector.
  */
 inline void strutftoucs(const std::string& src, std::vector<uint32_t>* dest) {
@@ -2137,6 +2256,88 @@ inline char* memdup(const char* ptr, size_t size) {
 
 
 /**
+ * Compare two regions by case insensitive evaluation.
+ */
+inline int32_t memicmp(const void* abuf, const void* bbuf, size_t size) {
+  _assert_(abuf && bbuf && size <= MEMMAXSIZ);
+  const unsigned char* ap = (unsigned char*)abuf;
+  const unsigned char* bp = (unsigned char*)bbuf;
+  const unsigned char* ep = ap + size;
+  while (ap < ep) {
+    int32_t ac = *ap;
+    if (ac >= 'A' && ac <= 'Z') ac += 'a' - 'A';
+    int32_t bc = *bp;
+    if (bc >= 'A' && bc <= 'Z') bc += 'a' - 'A';
+    if (ac != bc) return ac - bc;
+    ap++;
+    bp++;
+  }
+  return 0;
+}
+
+
+/**
+ * Find the first occurrence of a sub pattern.
+ */
+inline void* memmem(const void* hbuf, size_t hsiz, const void* nbuf, size_t nsiz) {
+  _assert_(hbuf && hsiz <= MEMMAXSIZ && nbuf && nsiz <= MEMMAXSIZ);
+  if (nsiz < 1) return (void*)hbuf;
+  if (hsiz < nsiz) return NULL;
+  int32_t tc = *(unsigned char*)nbuf;
+  const unsigned char* rp = (unsigned char*)hbuf;
+  const unsigned char* ep = (unsigned char*)hbuf + hsiz - nsiz;
+  while (rp <= ep) {
+    if (*rp == tc) {
+      bool hit = true;
+      for (size_t i = 1; i < nsiz; i++) {
+        if (rp[i] != ((unsigned char*)nbuf)[i]) {
+          hit = false;
+          break;
+        }
+      }
+      if (hit) return (void*)rp;
+    }
+    rp++;
+  }
+  return NULL;
+}
+
+
+/**
+ * Find the first occurrence of a sub pattern by case insensitive evaluation.
+ */
+inline void* memimem(const void* hbuf, size_t hsiz, const void* nbuf, size_t nsiz) {
+  _assert_(hbuf && hsiz <= MEMMAXSIZ && nbuf && nsiz <= MEMMAXSIZ);
+  if (nsiz < 1) return (void*)hbuf;
+  if (hsiz < nsiz) return NULL;
+  int32_t tc = *(unsigned char*)nbuf;
+  if (tc >= 'A' && tc <= 'Z') tc += 'a' - 'A';
+  const unsigned char* rp = (unsigned char*)hbuf;
+  const unsigned char* ep = (unsigned char*)hbuf + hsiz - nsiz;
+  while (rp <= ep) {
+    int32_t cc = *rp;
+    if (cc >= 'A' && cc <= 'Z') cc += 'a' - 'A';
+    if (cc == tc) {
+      bool hit = true;
+      for (size_t i = 1; i < nsiz; i++) {
+        int32_t hc = rp[i];
+        if (hc >= 'A' && hc <= 'Z') hc += 'a' - 'A';
+        int32_t nc = ((unsigned char*)nbuf)[i];
+        if (nc >= 'A' && nc <= 'Z') nc += 'a' - 'A';
+        if (hc != nc) {
+          hit = false;
+          break;
+        }
+      }
+      if (hit) return (void*)rp;
+    }
+    rp++;
+  }
+  return NULL;
+}
+
+
+/**
  * Duplicate a string on memory.
  */
 inline char* strdup(const char* str) {
@@ -2263,19 +2464,53 @@ inline char* strnrmspc(char* str) {
 
 
 /**
- * Compare two strings with case insensitive evaluation.
+ * Compare two strings by case insensitive evaluation.
  */
 inline int32_t stricmp(const char* astr, const char* bstr) {
   _assert_(astr && bstr);
   while (*astr != '\0') {
     if (*bstr == '\0') return 1;
-    int32_t ac = (*astr >= 'A' && *astr <= 'Z') ? *astr + ('a' - 'A') : *(unsigned char*)astr;
-    int32_t bc = (*bstr >= 'A' && *bstr <= 'Z') ? *bstr + ('a' - 'A') : *(unsigned char*)bstr;
+    int32_t ac = *(unsigned char*)astr;
+    if (ac >= 'A' && ac <= 'Z') ac += 'a' - 'A';
+    int32_t bc = *(unsigned char*)bstr;
+    if (bc >= 'A' && bc <= 'Z') bc += 'a' - 'A';
     if (ac != bc) return ac - bc;
     astr++;
     bstr++;
   }
   return (*bstr == '\0') ? 0 : -1;
+}
+
+
+/**
+ * Find the first occurrence of a substring by case insensitive evaluation.
+ */
+inline char* stristr(const char* hstr, const char* nstr) {
+  _assert_(hstr && nstr);
+  if (*nstr == '\0') return (char*)hstr;
+  int32_t tc = *nstr;
+  if (tc >= 'A' && tc <= 'Z') tc += 'a' - 'A';
+  const char* rp = hstr;
+  while (*rp != '\0') {
+    int32_t cc = *rp;
+    if (cc >= 'A' && cc <= 'Z') cc += 'a' - 'A';
+    if (cc == tc) {
+      bool hit = true;
+      for (size_t i = 1; nstr[i] != '\0'; i++) {
+        int32_t hc = rp[i];
+        if (hc >= 'A' && hc <= 'Z') hc += 'a' - 'A';
+        int32_t nc = nstr[i];
+        if (nc >= 'A' && nc <= 'Z') nc += 'a' - 'A';
+        if (hc != nc) {
+          hit = false;
+          break;
+        }
+      }
+      if (hit) return (char*)rp;
+    }
+    rp++;
+  }
+  return NULL;
 }
 
 

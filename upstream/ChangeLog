@@ -1,3 +1,11 @@
+2011-07-12  FAL Labs  <info@fallabs.com>
+
+	* kcutil.h (memicmp, memmem, memimem, stristr): new functions.
+
+	* kcutil.h (strupper, strlower, strtrim): new functions.
+
+	- Release: 1.2.67
+
 2011-07-01  FAL Labs  <info@fallabs.com>
 
 	* kcutil.h (strutftoucs, strucstoutf): new functions.

@@ -32,7 +32,8 @@ static void normalizequery(const std::string& query, std::string* dest);
 static int32_t runimport(int argc, char** argv);
 static int32_t runsearch(int argc, char** argv);
 static int32_t procimport(const char* path, const char* srcpath);
-static int32_t procsearch(const char* path, const char* query, int64_t max, int32_t mode);
+static int32_t procsearch(const char* path, const char* query, int64_t max,
+                          int32_t mode, bool ts);
 
 
 // structure for sorting indexed records
@@ -90,7 +91,7 @@ static void usage() {
   std::cerr << g_progname << ": the command line utility of the word dictionary" << std::endl;
   std::cerr << std::endl;
   std::cerr << "  " << g_progname << " import path src" << std::endl;
-  std::cerr << "  " << g_progname << " search [-max num] [-f|-a|-m|-r|-tm|-tr] [-iu]"
+  std::cerr << "  " << g_progname << " search [-max num] [-f|-a|-m|-r|-tm|-tr] [-ts] [-iu]"
       " path query" << std::endl;
   std::cerr << std::endl;
   std::exit(1);
@@ -558,6 +559,7 @@ static int32_t runsearch(int argc, char** argv) {
   const char* query = NULL;
   int64_t max = 10;
   int32_t mode = 0;
+  bool ts = false;
   bool iu = false;
   for (int32_t i = 2; i < argc; i++) {
     if (!argbrk && argv[i][0] == '-') {
@@ -578,6 +580,8 @@ static int32_t runsearch(int argc, char** argv) {
         mode = 'M';
       } else if (!std::strcmp(argv[i], "-tr")) {
         mode = 'R';
+      } else if (!std::strcmp(argv[i], "-ts")) {
+        ts = true;
       } else if (!std::strcmp(argv[i], "-iu")) {
         iu = true;
       } else {
@@ -601,7 +605,7 @@ static int32_t runsearch(int argc, char** argv) {
   } else {
     qbuf = NULL;
   }
-  int32_t rv = procsearch(path, query, max, mode);
+  int32_t rv = procsearch(path, query, max, mode, ts);
   delete[] qbuf;
   return rv;
 }
@@ -721,14 +725,20 @@ static int32_t procimport(const char* path, const char* srcpath) {
 
 
 // perform search command
-static int32_t procsearch(const char* path, const char* query, int64_t max, int32_t mode) {
+static int32_t procsearch(const char* path, const char* query, int64_t max,
+                          int32_t mode, bool ts) {
   kc::TreeDB db;
   if (!db.open(path, kc::TreeDB::OREADER)) {
     dberrprint(&db, "DB::open failed");
     return 1;
   }
   std::string nquery;
-  normalizequery(query, &nquery);
+  if (ts) {
+    nquery = query;
+    kc::strtolower(&nquery);
+  } else {
+    normalizequery(query, &nquery);
+  }
   bool err = false;
   if (mode == 'a') {
     class VisitorImpl : public kc::DB::Visitor {
@@ -868,8 +878,8 @@ static int32_t procsearch(const char* path, const char* query, int64_t max, int3
   } else if (mode == 'M') {
     class VisitorImpl : public kc::DB::Visitor {
      public:
-      VisitorImpl(const std::string& query, int64_t max) :
-          query_(query), max_(max), lock_(), queue_() {}
+      VisitorImpl(const std::string& query, int64_t max, bool ts) :
+          query_(query), max_(max), ts_(ts), lock_(), queue_() {}
      private:
       const char* visit_full(const char* kbuf, size_t ksiz,
                              const char* vbuf, size_t vsiz, size_t* sp) {
@@ -892,9 +902,15 @@ static int32_t procsearch(const char* path, const char* query, int64_t max, int3
           rbuf++;
           rsiz--;
         }
-        std::string value;
-        normalizequery(std::string(rbuf, rsiz), &value);
-        if (value.find(query_) != std::string::npos) {
+        bool hit = false;
+        if (ts_) {
+          hit = kc::memimem(rbuf, rsiz, query_.data(), query_.size()) != NULL;
+        } else {
+          std::string value;
+          normalizequery(std::string(rbuf, rsiz), &value);
+          hit = value.find(query_) != std::string::npos;
+        }
+        if (hit) {
           ksiz--;
           while (ksiz > 0 && kbuf[ksiz] != '\t') {
             ksiz--;
@@ -930,10 +946,11 @@ static int32_t procsearch(const char* path, const char* query, int64_t max, int3
       }
       std::string query_;
       int64_t max_;
+      bool ts_;
       kc::Mutex lock_;
       std::priority_queue<PlainRecord> queue_;
     };
-    VisitorImpl visitor(nquery, max);
+    VisitorImpl visitor(nquery, max, ts);
     if (!db.scan_parallel(&visitor, 8)) {
       dberrprint(&db, "DB::close failed");
       err = true;
@@ -996,8 +1013,8 @@ static int32_t procsearch(const char* path, const char* query, int64_t max, int3
   } else if (mode == 'R') {
     class VisitorImpl : public kc::DB::Visitor {
      public:
-      VisitorImpl(const std::string& query, int64_t max) :
-          regex_(), max_(max), lock_(), queue_() {
+      VisitorImpl(const std::string& query, int64_t max, bool ts) :
+          regex_(), max_(max), ts_(ts), lock_(), queue_() {
         regex_.compile(query, kc::Regex::MATCHONLY);
       }
      private:
@@ -1022,9 +1039,17 @@ static int32_t procsearch(const char* path, const char* query, int64_t max, int3
           rbuf++;
           rsiz--;
         }
-        std::string value;
-        normalizequery(std::string(rbuf, rsiz), &value);
-        if (regex_.match(value)) {
+        bool hit = false;
+        if (ts_) {
+          std::string value(rbuf, rsiz);
+          kc::strtolower(&value);
+          hit = regex_.match(value);
+        } else {
+          std::string value(rbuf, rsiz);
+          normalizequery(std::string(rbuf, rsiz), &value);
+          hit = regex_.match(value);
+        }
+        if (hit) {
           ksiz--;
           while (ksiz > 0 && kbuf[ksiz] != '\t') {
             ksiz--;
@@ -1060,10 +1085,11 @@ static int32_t procsearch(const char* path, const char* query, int64_t max, int3
       }
       kc::Regex regex_;
       int64_t max_;
+      bool ts_;
       kc::Mutex lock_;
       std::priority_queue<PlainRecord> queue_;
     };
-    VisitorImpl visitor(nquery, max);
+    VisitorImpl visitor(nquery, max, ts);
     if (!db.scan_parallel(&visitor, 8)) {
       dberrprint(&db, "DB::close failed");
       err = true;

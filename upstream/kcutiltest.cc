@@ -2646,12 +2646,24 @@ static int32_t procmisc(int64_t rnum) {
       errprint(__LINE__, "arccipher: %s", name);
       err = true;
     }
+    if (kc::memicmp(obuf, ubuf, usiz)) {
+      errprint(__LINE__, "memicmp");
+      err = true;
+    }
+    if (!kc::memmem(obuf, osiz, ubuf, usiz)) {
+      errprint(__LINE__, "memmem");
+      err = true;
+    }
+    if (!kc::memimem(obuf, osiz, ubuf, usiz)) {
+      errprint(__LINE__, "memimem");
+      err = true;
+    }
     delete[] obuf;
     delete[] ebuf;
     ebuf = kc::memdup((char*)ubuf, usiz);
     ebuf[usiz] = '\0';
     obuf = kc::strdup(ebuf);
-    switch (myrand(16)) {
+    switch (myrand(17)) {
       case 0: kc::atoi(obuf); break;
       case 1: kc::atoix(obuf); break;
       case 2: kc::atoih(obuf); break;
@@ -2664,10 +2676,11 @@ static int32_t procmisc(int64_t rnum) {
       case 9: kc::strsqzspc(obuf); break;
       case 10: kc::strnrmspc(obuf); break;
       case 11: kc::stricmp(obuf, ebuf); break;
-      case 12: kc::strfwm(obuf, ebuf); break;
-      case 13: kc::strifwm(obuf, ebuf); break;
-      case 14: kc::strbwm(obuf, ebuf); break;
-      case 15: kc::stribwm(obuf, ebuf); break;
+      case 12: kc::stristr(obuf, ebuf); break;
+      case 13: kc::strfwm(obuf, ebuf); break;
+      case 14: kc::strifwm(obuf, ebuf); break;
+      case 15: kc::strbwm(obuf, ebuf); break;
+      case 16: kc::stribwm(obuf, ebuf); break;
     }
     delete[] obuf;
     delete[] ebuf;

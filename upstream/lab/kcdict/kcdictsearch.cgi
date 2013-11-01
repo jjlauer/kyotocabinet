@@ -14,6 +14,7 @@ DICTS =
 #   [ 'eijiro-reiji.kct', 'Reijiro' ],
   ]
 DICTGUESS = false
+TEXTSIMPLEMATCH = true
 ENV['PATH'] = (ENV['PATH'] || '') + ':/usr/local/bin:.:..:../..'
 ENV['LD_LIBRARY_PATH'] = (ENV['LD_LIBRARY_PATH'] || '') + ':/usr/local/lib:.:..:../..'
 
@@ -182,8 +183,9 @@ if !p_query.empty?
   else
     mode = ''
   end
-  cmd = sprintf('%s search -max %d %s -iu -- %s "%s"',
-                CMDNAME, p_num + p_skip + 1, mode, dict[0], CGI.escape(p_query))
+  tsmode = TEXTSIMPLEMATCH ? '-ts' : ''
+  cmd = sprintf('%s search -max %d %s %s -iu -- %s "%s"',
+                CMDNAME, p_num + p_skip + 1, mode, tsmode, dict[0], CGI.escape(p_query))
   records = []
   IO.popen(cmd) do |io|
     io.readlines.each do |line|
