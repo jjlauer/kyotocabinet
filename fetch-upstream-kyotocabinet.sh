@@ -1,7 +1,7 @@
 # downloads latest tarball, unpacks it, then commits
 # changes to ../kyotocabinet dir
 
-for i in {31..31}; do
+for i in {32..76}; do
 
 VERSION="1.2.${i}"
 #VERSION="1.2.16"
