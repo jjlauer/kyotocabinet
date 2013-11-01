@@ -714,7 +714,7 @@ void SpinLock::unlock() {
   ::InterlockedExchange((LONG*)&opq_, 0);
 #elif _KC_GCCATOMIC
   _assert_(true);
-  (void)__sync_lock_test_and_set(&opq_, 0);
+  __sync_lock_release(&opq_);
 #else
   _assert_(true);
   ::pthread_spinlock_t* spin = (::pthread_spinlock_t*)opq_;
@@ -841,7 +841,7 @@ void SlottedSpinLock::unlock(size_t idx) {
   _assert_(true);
   SlottedSpinLockCore* core = (SlottedSpinLockCore*)opq_;
   uint32_t* lock = core->locks + idx;
-  (void)__sync_lock_test_and_set(lock, 0);
+  __sync_lock_release(lock);
 #else
   _assert_(true);
   SlottedSpinLockCore* core = (SlottedSpinLockCore*)opq_;
@@ -922,7 +922,7 @@ void SlottedSpinLock::unlock_all() {
   size_t slotnum = core->slotnum;
   for (size_t i = 0; i < slotnum; i++) {
     uint32_t* lock = locks + i;
-    (void)__sync_lock_test_and_set(lock, 0);
+    __sync_lock_release(lock);
   }
 #else
   _assert_(true);
@@ -1468,7 +1468,7 @@ static void spinrwlockunlock(SpinRWLockCore* core) {
   ::InterlockedExchange(&core->sem, 0);
 #elif _KC_GCCATOMIC
   _assert_(core);
-  (void)__sync_lock_test_and_set(&core->sem, 0);
+  __sync_lock_release(&core->sem);
 #else
   _assert_(core);
   if (::pthread_spin_unlock(&core->sem) != 0) throw std::runtime_error("pthread_spin_unlock");
@@ -1751,7 +1751,7 @@ static void slottedspinrwlockunlock(SlottedSpinRWLockCore* core, size_t idx) {
   ::InterlockedExchange(core->sems + idx, 0);
 #elif _KC_GCCATOMIC
   _assert_(core);
-  (void)__sync_lock_test_and_set(core->sems + idx, 0);
+  __sync_lock_release(core->sems + idx);
 #else
   _assert_(core);
   if (::pthread_spin_unlock(core->sems + idx) != 0)

@@ -43,9 +43,9 @@ namespace kyotocabinet {                 // common namespace
  * Directory hash database.
  * @note This class is a concrete class to operate a hash database in a directory.  This class
  * can be inherited but overwriting methods is forbidden.  Before every database operation, it is
- * necessary to call the TreeDB::open method in order to open a database file and connect the
+ * necessary to call the DirDB::open method in order to open a database file and connect the
  * database object to it.  To avoid data missing or corruption, it is important to close every
- * database file by the TreeDB::close method when the database is no longer in use.  It is
+ * database file by the DirDB::close method when the database is no longer in use.  It is
  * forbidden for multible database objects in a process to open the same database at the same
  * time.  It is forbidden to share a database object with child processes.
  */
@@ -1079,6 +1079,22 @@ class DirDB : public BasicDB {
   Cursor* cursor() {
     _assert_(true);
     return new Cursor(this);
+  }
+  /**
+   * Write a log message.
+   * @param file the file name of the program source code.
+   * @param line the line number of the program source code.
+   * @param func the function name of the program source code.
+   * @param kind the kind of the event.  Logger::DEBUG for debugging, Logger::INFO for normal
+   * information, Logger::WARN for warning, and Logger::ERROR for fatal error.
+   * @param message the supplement message.
+   */
+  void log(const char* file, int32_t line, const char* func, Logger::Kind kind,
+           const char* message) {
+    _assert_(file && line > 0 && func && message);
+    ScopedSpinRWLock lock(&mlock_, false);
+    if (!logger_) return;
+    logger_->log(file, line, func, kind, message);
   }
   /**
    * Set the internal logger.

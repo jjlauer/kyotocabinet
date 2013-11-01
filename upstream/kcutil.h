@@ -1679,16 +1679,14 @@ inline char* hexencode(const void* buf, size_t size) {
  */
 inline char* hexdecode(const char* str, size_t* sp) {
   _assert_(str && sp);
-  size_t zsiz = std::strlen(str);
-  char* zbuf = new char[zsiz+1];
+  char* zbuf = new char[std::strlen(str)+1];
   char* wp = zbuf;
-  for (size_t i = 0; i < zsiz; i += 2) {
-    while (str[i] >= '\0' && str[i] <= ' ') {
-      i++;
+  while (true) {
+    while (*str > '\0' && *str <= ' ') {
+      str++;
     }
     int32_t num = 0;
-    int32_t c = str[i];
-    if (c == '\0') break;
+    int32_t c = *(str++);
     if (c >= '0' && c <= '9') {
       num = c - '0';
     } else if (c >= 'a' && c <= 'f') {
@@ -1698,7 +1696,7 @@ inline char* hexdecode(const char* str, size_t* sp) {
     } else if (c == '\0') {
       break;
     }
-    c = str[i+1];
+    c = *(str++);
     if (c >= '0' && c <= '9') {
       num = num * 0x10 + c - '0';
     } else if (c >= 'a' && c <= 'f') {
@@ -1706,6 +1704,7 @@ inline char* hexdecode(const char* str, size_t* sp) {
     } else if (c >= 'A' && c <= 'F') {
       num = num * 0x10 + c - 'A' + 10;
     } else if (c == '\0') {
+      *(wp++) = num;
       break;
     }
     *(wp++) = num;

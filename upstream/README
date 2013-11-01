@@ -8,7 +8,8 @@ Please read the following documents with a WWW browser.
 How to install Kyoto Cabinet is explained in the specification.
 
   README         - this file
-  COPYING        - license
+  COPYING        - license (GPLv3)
+  FOSSEXCEPTION  - license exception for FOSS
   ChangeLog      - history of enhancement
   doc/index.html - index of documents
 

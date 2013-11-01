@@ -48,9 +48,11 @@ const char* visitfull(const char* kbuf, size_t ksiz,
                       const char* vbuf, size_t vsiz, size_t* sp, void* opq);
 static int32_t runorder(int argc, char** argv);
 static int32_t runmap(int argc, char** argv);
+static int32_t runlist(int argc, char** argv);
 static int32_t procorder(const char* path, int64_t rnum, int32_t rnd, int32_t etc,
                          int32_t tran, int32_t oflags);
 static int32_t procmap(int64_t rnum, int32_t rnd, int32_t etc, int64_t bnum);
+static int32_t proclist(int64_t rnum, int32_t rnd, int32_t etc);
 
 
 /* main routine */
@@ -64,6 +66,8 @@ int main(int argc, char **argv) {
     rv = runorder(argc, argv);
   } else if (!strcmp(argv[1], "map")) {
     rv = runmap(argc, argv);
+  } else if (!strcmp(argv[1], "list")) {
+    rv = runlist(argc, argv);
   } else {
     usage();
   }
@@ -86,6 +90,7 @@ static void usage() {
   eprintf("  %s order [-rnd] [-etc] [-tran] [-oat|-oas|-onl|-otl|-onr] path rnum\n",
           g_progname);
   eprintf("  %s map [-rnd] [-etc] [-bnum num] rnum\n", g_progname);
+  eprintf("  %s list [-rnd] [-etc] rnum\n", g_progname);
   eprintf("\n");
   exit(1);
 }
@@ -283,6 +288,40 @@ static int32_t runmap(int argc, char** argv) {
   rnum = kcatoix(rstr);
   if (rnum < 1) usage();
   return procmap(rnum, rnd, etc, bnum);
+}
+
+
+/* parse arguments of list command */
+static int32_t runlist(int argc, char** argv) {
+  int32_t argbrk = FALSE;
+  const char* rstr;
+  int32_t rnd, etc, i;
+  int64_t rnum;
+  rstr = NULL;
+  rnd = FALSE;
+  etc = FALSE;
+  for (i = 2; i < argc; i++) {
+    if (!argbrk && argv[i][0] == '-') {
+      if (!strcmp(argv[i], "--")) {
+        argbrk = TRUE;
+      } else if (!strcmp(argv[i], "-rnd")) {
+        rnd = TRUE;
+      } else if (!strcmp(argv[i], "-etc")) {
+        etc = TRUE;
+      } else {
+        usage();
+      }
+    } else if (!rstr) {
+      argbrk = TRUE;
+      rstr = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if (!rstr) usage();
+  rnum = kcatoix(rstr);
+  if (rnum < 1) usage();
+  return proclist(rnum, rnd, etc);
 }
 
 
@@ -762,7 +801,7 @@ static int32_t procmap(int64_t rnum, int32_t rnd, int32_t etc, int64_t bnum) {
     }
     if (rnd) oprintf(" (end)\n");
     kcmapiterdel(iter);
-    if (!rnd && cnt != kcmapcount(map)) {
+    if (!rnd && cnt != (int64_t)kcmapcount(map)) {
       eprintf("%s: kcmapcount failed\n", g_progname);
       err = TRUE;
     }
@@ -793,7 +832,7 @@ static int32_t procmap(int64_t rnum, int32_t rnd, int32_t etc, int64_t bnum) {
     }
     if (rnd) oprintf(" (end)\n");
     kcmapsortdel(sort);
-    if (!rnd && cnt != kcmapcount(map)) {
+    if (!rnd && cnt != (int64_t)kcmapcount(map)) {
       eprintf("%s: kcmapcount failed\n", g_progname);
       err = TRUE;
     }
@@ -818,6 +857,120 @@ static int32_t procmap(int64_t rnum, int32_t rnd, int32_t etc, int64_t bnum) {
   oprintf("count: %ld\n", (long)kcmapcount(map));
   oprintf("time: %.3f\n", etime - stime);
   kcmapdel(map);
+  oprintf("%s\n\n", err ? "error" : "ok");
+  return err ? 1 : 0;
+}
+
+
+/* perform list command */
+static int32_t proclist(int64_t rnum, int32_t rnd, int32_t etc) {
+  KCLIST* list;
+  int32_t err;
+  char buf[RECBUFSIZ];
+  size_t size;
+  int64_t i, cnt;
+  double stime, etime;
+  oprintf("<Memory-saving Array List Test>\n  rnum=%ld  rnd=%d  etc=%d\n\n",
+          (long)rnum, rnd, etc);
+  err = FALSE;
+  list = kclistnew();
+  oprintf("setting records:\n");
+  stime = kctime();
+  for (i = 1; !err && i <= rnum; i++) {
+    size = sprintf(buf, "%08ld", (long)i);
+    if (rnd && myrand(2) == 0) {
+      kclistunshift(list, buf, size);
+    } else {
+      kclistpush(list, buf, size);
+    }
+    if (rnum > 250 && i % (rnum / 250) == 0) {
+      oputchar('.');
+      if (i == rnum || i % (rnum / 10) == 0) oprintf(" (%08ld)\n", (long)i);
+    }
+  }
+  etime = kctime();
+  oprintf("count: %ld\n", (long)kclistcount(list));
+  oprintf("time: %.3f\n", etime - stime);
+  oprintf("getting records:\n");
+  stime = kctime();
+  cnt = kclistcount(list);
+  for (i = 1; !err && i <= rnum; i++) {
+    kclistget(list, rnd ? myrand(cnt) : i - 1, &size);
+    if (rnum > 250 && i % (rnum / 250) == 0) {
+      oputchar('.');
+      if (i == rnum || i % (rnum / 10) == 0) oprintf(" (%08ld)\n", (long)i);
+    }
+  }
+  etime = kctime();
+  oprintf("count: %ld\n", (long)kclistcount(list));
+  oprintf("time: %.3f\n", etime - stime);
+  oprintf("removing records:\n");
+  stime = kctime();
+  for (i = 1; !err && i <= rnum; i++) {
+    if (rnd && myrand(2) == 0) {
+      kclistshift(list);
+    } else {
+      kclistpop(list);
+    }
+    if (rnum > 250 && i % (rnum / 250) == 0) {
+      oputchar('.');
+      if (i == rnum || i % (rnum / 10) == 0) oprintf(" (%08ld)\n", (long)i);
+    }
+  }
+  etime = kctime();
+  oprintf("count: %ld\n", (long)kclistcount(list));
+  oprintf("time: %.3f\n", etime - stime);
+  if (etc) {
+    oprintf("wicked testing:\n");
+    stime = kctime();
+    memset(buf, '*', sizeof(buf));
+    for (i = 1; !err && i <= rnum; i++) {
+      size = rnd ? (size_t)myrand(sizeof(buf)) : sizeof(buf);
+      cnt = kclistcount(list);
+      switch (rnd ? myrand(10) : i % 10) {
+        case 0: {
+          kclistpop(list);
+          break;
+        }
+        case 1: {
+          kclistunshift(list, buf, size);
+          break;
+        }
+        case 2: {
+          kclistshift(list);
+          break;
+        }
+        case 3: {
+          kclistinsert(list, buf, size, rnd && cnt > 0 ? myrand(cnt) : cnt / 2);
+          break;
+        }
+        case 4: {
+          if (cnt > 0) kclistremove(list, rnd ? myrand(cnt) : cnt / 2);
+          break;
+        }
+        case 5: {
+          if (cnt > 0) kclistget(list, rnd ? myrand(cnt) : cnt / 2, &size);
+          break;
+        }
+        case 6: {
+          if (rnd ? myrand(100) == 0 : i % 127 == 0) kclistclear(list);
+          break;
+        }
+        default: {
+          kclistpush(list, buf, size);
+          break;
+        }
+      }
+      if (rnum > 250 && i % (rnum / 250) == 0) {
+        oputchar('.');
+        if (i == rnum || i % (rnum / 10) == 0) oprintf(" (%08ld)\n", (long)i);
+      }
+    }
+    etime = kctime();
+    oprintf("time: %.3f\n", etime - stime);
+    oprintf("count: %ld\n", (long)kclistcount(list));
+  }
+  kclistdel(list);
   oprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }

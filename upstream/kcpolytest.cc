@@ -28,12 +28,15 @@ int64_t g_memusage;                      // memory usage
 int main(int argc, char** argv);
 static void usage();
 static void dberrprint(kc::BasicDB* db, int32_t line, const char* func);
+static void dberrprint(kc::IndexDB* db, int32_t line, const char* func);
 static void dbmetaprint(kc::BasicDB* db, bool verbose);
+static void dbmetaprint(kc::IndexDB* db, bool verbose);
 static int32_t runorder(int argc, char** argv);
 static int32_t runqueue(int argc, char** argv);
 static int32_t runwicked(int argc, char** argv);
 static int32_t runtran(int argc, char** argv);
 static int32_t runmapred(int argc, char** argv);
+static int32_t runindex(int argc, char** argv);
 static int32_t runmisc(int argc, char** argv);
 static int32_t procorder(const char* path, int64_t rnum, int32_t thnum, bool rnd, int32_t mode,
                          bool tran, int32_t oflags, bool lv);
@@ -46,6 +49,8 @@ static int32_t proctran(const char* path, int64_t rnum, int32_t thnum, int32_t i
 static int32_t procmapred(const char* path, int64_t rnum, bool rnd, int32_t oflags, bool lv,
                           const char* tmpdir, int64_t dbnum, int64_t clim, int64_t cbnum,
                           int32_t opts);
+static int32_t procindex(const char* path, int64_t rnum, int32_t thnum, bool rnd, int32_t mode,
+                         int32_t oflags, bool lv);
 static int32_t procmisc(const char* path);
 
 
@@ -69,6 +74,8 @@ int main(int argc, char** argv) {
     rv = runtran(argc, argv);
   } else if (!std::strcmp(argv[1], "mapred")) {
     rv = runmapred(argc, argv);
+  } else if (!std::strcmp(argv[1], "index")) {
+    rv = runindex(argc, argv);
   } else if (!std::strcmp(argv[1], "misc")) {
     rv = runmisc(argc, argv);
   } else {
@@ -100,6 +107,8 @@ static void usage() {
           " path rnum\n", g_progname);
   eprintf("  %s mapred [-rnd] [-oat|-oas|-onl|-otl|-onr] [-lv] [-tmp str]"
           " [-dbnum num] [-clim num] [-cbnum num] [-xnl] [-xnc] path rnum\n", g_progname);
+  eprintf("  %s index [-th num] [-rnd] [-set|-get|-rem|-etc]"
+          " [-oat|-oas|-onl|-otl|-onr] [-lv] path rnum\n", g_progname);
   eprintf("  %s misc path\n", g_progname);
   eprintf("\n");
   std::exit(1);
@@ -114,8 +123,35 @@ static void dberrprint(kc::BasicDB* db, int32_t line, const char* func) {
 }
 
 
+// print the error message of a database
+static void dberrprint(kc::IndexDB* idb, int32_t line, const char* func) {
+  dberrprint(idb->reveal_inner_db(), line, func);
+}
+
+
 // print members of a database
 static void dbmetaprint(kc::BasicDB* db, bool verbose) {
+  if (verbose) {
+    std::map<std::string, std::string> status;
+    if (db->status(&status)) {
+      std::map<std::string, std::string>::iterator it = status.begin();
+      std::map<std::string, std::string>::iterator itend = status.end();
+      while (it != itend) {
+        oprintf("%s: %s\n", it->first.c_str(), it->second.c_str());
+        ++it;
+      }
+    }
+  } else {
+    oprintf("count: %lld\n", (long long)db->count());
+    oprintf("size: %lld\n", (long long)db->size());
+  }
+  int64_t musage = memusage();
+  if (musage > 0) oprintf("memory: %lld\n", (long long)(musage - g_memusage));
+}
+
+
+// print members of a database
+static void dbmetaprint(kc::IndexDB* db, bool verbose) {
   if (verbose) {
     std::map<std::string, std::string> status;
     if (db->status(&status)) {
@@ -425,6 +461,65 @@ static int32_t runmapred(int argc, char** argv) {
   int64_t rnum = kc::atoix(rstr);
   if (rnum < 1) usage();
   int32_t rv = procmapred(path, rnum, rnd, oflags, lv, tmpdir, dbnum, clim, cbnum, opts);
+  return rv;
+}
+
+
+// parse arguments of index command
+static int32_t runindex(int argc, char** argv) {
+  bool argbrk = false;
+  const char* path = NULL;
+  const char* rstr = NULL;
+  int32_t thnum = 1;
+  bool rnd = false;
+  int32_t mode = 0;
+  int32_t oflags = 0;
+  bool lv = false;
+  for (int32_t i = 2; i < argc; i++) {
+    if (!argbrk && argv[i][0] == '-') {
+      if (!std::strcmp(argv[i], "--")) {
+        argbrk = true;
+      } else if (!std::strcmp(argv[i], "-th")) {
+        if (++i >= argc) usage();
+        thnum = kc::atoix(argv[i]);
+      } else if (!std::strcmp(argv[i], "-rnd")) {
+        rnd = true;
+      } else if (!std::strcmp(argv[i], "-set")) {
+        mode = 's';
+      } else if (!std::strcmp(argv[i], "-get")) {
+        mode = 'g';
+      } else if (!std::strcmp(argv[i], "-rem")) {
+        mode = 'r';
+      } else if (!std::strcmp(argv[i], "-etc")) {
+        mode = 'e';
+      } else if (!std::strcmp(argv[i], "-oat")) {
+        oflags |= kc::PolyDB::OAUTOTRAN;
+      } else if (!std::strcmp(argv[i], "-oas")) {
+        oflags |= kc::PolyDB::OAUTOSYNC;
+      } else if (!std::strcmp(argv[i], "-onl")) {
+        oflags |= kc::PolyDB::ONOLOCK;
+      } else if (!std::strcmp(argv[i], "-otl")) {
+        oflags |= kc::PolyDB::OTRYLOCK;
+      } else if (!std::strcmp(argv[i], "-onr")) {
+        oflags |= kc::PolyDB::ONOREPAIR;
+      } else if (!std::strcmp(argv[i], "-lv")) {
+        lv = true;
+      } else {
+        usage();
+      }
+    } else if (!path) {
+      argbrk = true;
+      path = argv[i];
+    } else if (!rstr) {
+      rstr = argv[i];
+    } else {
+      usage();
+    }
+  }
+  if (!path || !rstr) usage();
+  int64_t rnum = kc::atoix(rstr);
+  if (rnum < 1 || thnum < 1) usage();
+  int32_t rv = procindex(path, rnum, thnum, rnd, mode, oflags, lv);
   return rv;
 }
 
@@ -2221,6 +2316,18 @@ static int32_t procmapred(const char* path, int64_t rnum, bool rnd, int32_t ofla
       }
       return true;
     }
+    bool preprocess() {
+      oprintf("preprocessing:\n");
+      return true;
+    }
+    bool midprocess() {
+      oprintf("midprocessing:\n");
+      return true;
+    }
+    bool postprocess() {
+      oprintf("postprocessing:\n");
+      return true;
+    }
     bool log(const char* name, const char* message) {
       oprintf("%s: %s", name, message);
       int64_t musage = memusage();
@@ -2270,6 +2377,340 @@ static int32_t procmapred(const char* path, int64_t rnum, bool rnd, int32_t ofla
     err = true;
   }
   oprintf("time: %.3f\n", kc::time() - stime);
+  oprintf("%s\n\n", err ? "error" : "ok");
+  return err ? 1 : 0;
+}
+
+
+// perform index command
+static int32_t procindex(const char* path, int64_t rnum, int32_t thnum, bool rnd, int32_t mode,
+                         int32_t oflags, bool lv) {
+  oprintf("<Index Database Test>\n  seed=%u  path=%s  rnum=%lld  thnum=%d  rnd=%d  mode=%d"
+          "  oflags=%d  lv=%d\n\n",
+          g_randseed, path, (long long)rnum, thnum, rnd, mode, oflags, lv);
+  bool err = false;
+  kc::IndexDB db;
+  oprintf("opening the database:\n");
+  double stime = kc::time();
+  db.tune_logger(stdlogger(g_progname, &std::cout),
+                 lv ? kc::UINT32MAX : kc::BasicDB::Logger::WARN | kc::BasicDB::Logger::ERROR);
+  uint32_t omode = kc::PolyDB::OWRITER | kc::PolyDB::OCREATE | kc::PolyDB::OTRUNCATE;
+  if (mode == 'r') {
+    omode = kc::PolyDB::OWRITER | kc::PolyDB::OCREATE;
+  } else if (mode == 'g' || mode == 'w') {
+    omode = kc::PolyDB::OREADER;
+  }
+  if (!db.open(path, omode | oflags)) {
+    dberrprint(&db, __LINE__, "DB::open");
+    err = true;
+  }
+  double etime = kc::time();
+  dbmetaprint(&db, false);
+  oprintf("time: %.3f\n", etime - stime);
+  if (mode == 0 || mode == 's' || mode == 'e') {
+    oprintf("appending records:\n");
+    stime = kc::time();
+    class ThreadSet : public kc::Thread {
+     public:
+      void setparams(int32_t id, kc::IndexDB* db, int64_t rnum, int32_t thnum,
+                     bool rnd, int32_t mode) {
+        id_ = id;
+        db_ = db;
+        rnum_ = rnum;
+        thnum_ = thnum;
+        err_ = false;
+        rnd_ = rnd;
+        mode_ = mode;
+      }
+      bool error() {
+        return err_;
+      }
+      void run() {
+        int64_t base = id_ * rnum_;
+        int64_t range = rnum_ * thnum_;
+        for (int64_t i = 1; !err_ && i <= rnum_; i++) {
+          char kbuf[RECBUFSIZ];
+          size_t ksiz = std::sprintf(kbuf, "%08lld",
+                                     (long long)(rnd_ ? myrand(range) + 1 : base + i));
+          if (!db_->append(kbuf, ksiz, kbuf, ksiz)) {
+            dberrprint(db_, __LINE__, "DB::append");
+            err_ = true;
+          }
+          if (id_ < 1 && rnum_ > 250 && i % (rnum_ / 250) == 0) {
+            oputchar('.');
+            if (i == rnum_ || i % (rnum_ / 10) == 0) oprintf(" (%08lld)\n", (long long)i);
+          }
+        }
+      }
+     private:
+      int32_t id_;
+      kc::IndexDB* db_;
+      int64_t rnum_;
+      int32_t thnum_;
+      bool err_;
+      bool rnd_;
+      int32_t mode_;
+    };
+    ThreadSet threadsets[THREADMAX];
+    if (thnum < 2) {
+      threadsets[0].setparams(0, &db, rnum, thnum, rnd, mode);
+      threadsets[0].run();
+      if (threadsets[0].error()) err = true;
+    } else {
+      for (int32_t i = 0; i < thnum; i++) {
+        threadsets[i].setparams(i, &db, rnum, thnum, rnd, mode);
+        threadsets[i].start();
+      }
+      for (int32_t i = 0; i < thnum; i++) {
+        threadsets[i].join();
+        if (threadsets[i].error()) err = true;
+      }
+    }
+    etime = kc::time();
+    dbmetaprint(&db, mode == 's');
+    oprintf("time: %.3f\n", etime - stime);
+  }
+  if (mode == 'e') {
+    oprintf("wicked testing:\n");
+    stime = kc::time();
+    class ThreadWicked : public kc::Thread {
+     public:
+      void setparams(int32_t id, kc::IndexDB* db, int64_t rnum, int32_t thnum,
+                     bool rnd, int32_t mode) {
+        id_ = id;
+        db_ = db;
+        rnum_ = rnum;
+        thnum_ = thnum;
+        err_ = false;
+        rnd_ = rnd;
+        mode_ = mode;
+      }
+      bool error() {
+        return err_;
+      }
+      void run() {
+        int64_t base = id_ * rnum_;
+        int64_t range = rnum_ * thnum_;
+        for (int64_t i = 1; !err_ && i <= rnum_; i++) {
+          char kbuf[RECBUFSIZ];
+          size_t ksiz = std::sprintf(kbuf, "%08lld",
+                                     (long long)(rnd_ ? myrand(range) + 1 : base + i));
+          switch (i % 5) {
+            case 0: {
+              if (!db_->set(kbuf, ksiz, kbuf, ksiz)) {
+                dberrprint(db_, __LINE__, "DB::set");
+                err_ = true;
+              }
+              break;
+            }
+            case 1: {
+              if (!db_->add(kbuf, ksiz, kbuf, ksiz) &&
+                  db_->error() != kc::BasicDB::Error::DUPREC) {
+                dberrprint(db_, __LINE__, "DB::add");
+                err_ = true;
+              }
+              break;
+            }
+            case 2: {
+              if (!db_->replace(kbuf, ksiz, kbuf, ksiz) &&
+                  db_->error() != kc::BasicDB::Error::NOREC) {
+                dberrprint(db_, __LINE__, "DB::replace");
+                err_ = true;
+              }
+              break;
+            }
+            default: {
+              size_t vsiz;
+              char* vbuf = db_->get(kbuf, ksiz, &vsiz);
+              if (vbuf) {
+                delete[] vbuf;
+              } else if (db_->error() != kc::BasicDB::Error::NOREC) {
+                dberrprint(db_, __LINE__, "DB::get");
+                err_ = true;
+              }
+              break;
+            }
+          }
+          if (rnd_ && myrand(range) == 0 && !db_->synchronize(false, NULL)) {
+            dberrprint(db_, __LINE__, "DB::synchronize");
+            err_ = true;
+          }
+          if (id_ < 1 && rnum_ > 250 && i % (rnum_ / 250) == 0) {
+            oputchar('.');
+            if (i == rnum_ || i % (rnum_ / 10) == 0) oprintf(" (%08lld)\n", (long long)i);
+          }
+        }
+      }
+     private:
+      int32_t id_;
+      kc::IndexDB* db_;
+      int64_t rnum_;
+      int32_t thnum_;
+      bool err_;
+      bool rnd_;
+      int32_t mode_;
+    };
+    ThreadWicked threadsets[THREADMAX];
+    if (thnum < 2) {
+      threadsets[0].setparams(0, &db, rnum, thnum, rnd, mode);
+      threadsets[0].run();
+      if (threadsets[0].error()) err = true;
+    } else {
+      for (int32_t i = 0; i < thnum; i++) {
+        threadsets[i].setparams(i, &db, rnum, thnum, rnd, mode);
+        threadsets[i].start();
+      }
+      for (int32_t i = 0; i < thnum; i++) {
+        threadsets[i].join();
+        if (threadsets[i].error()) err = true;
+      }
+    }
+    etime = kc::time();
+    dbmetaprint(&db, false);
+    oprintf("time: %.3f\n", etime - stime);
+  }
+  if (mode == 0 || mode == 'g' || mode == 'e') {
+    oprintf("getting records:\n");
+    stime = kc::time();
+    class ThreadGet : public kc::Thread {
+     public:
+      void setparams(int32_t id, kc::IndexDB* db, int64_t rnum, int32_t thnum,
+                     bool rnd, int32_t mode) {
+        id_ = id;
+        db_ = db;
+        rnum_ = rnum;
+        thnum_ = thnum;
+        err_ = false;
+        rnd_ = rnd;
+        mode_ = mode;
+      }
+      bool error() {
+        return err_;
+      }
+      void run() {
+        int64_t base = id_ * rnum_;
+        int64_t range = rnum_ * thnum_;
+        for (int64_t i = 1; !err_ && i <= rnum_; i++) {
+          char kbuf[RECBUFSIZ];
+          size_t ksiz = std::sprintf(kbuf, "%08lld",
+                                     (long long)(rnd_ ? myrand(range) + 1 : base + i));
+          size_t vsiz;
+          char* vbuf = db_->get(kbuf, ksiz, &vsiz);
+          if (vbuf) {
+            if (vsiz < ksiz || std::memcmp(vbuf, kbuf, ksiz)) {
+              dberrprint(db_, __LINE__, "DB::get");
+              err_ = true;
+            }
+            delete[] vbuf;
+          } else if (!rnd_ || db_->error() != kc::BasicDB::Error::NOREC) {
+            dberrprint(db_, __LINE__, "DB::get");
+            err_ = true;
+          }
+          if (id_ < 1 && rnum_ > 250 && i % (rnum_ / 250) == 0) {
+            oputchar('.');
+            if (i == rnum_ || i % (rnum_ / 10) == 0) oprintf(" (%08lld)\n", (long long)i);
+          }
+        }
+      }
+     private:
+      int32_t id_;
+      kc::IndexDB* db_;
+      int64_t rnum_;
+      int32_t thnum_;
+      bool err_;
+      bool rnd_;
+      int32_t mode_;
+    };
+    ThreadGet threadsets[THREADMAX];
+    if (thnum < 2) {
+      threadsets[0].setparams(0, &db, rnum, thnum, rnd, mode);
+      threadsets[0].run();
+      if (threadsets[0].error()) err = true;
+    } else {
+      for (int32_t i = 0; i < thnum; i++) {
+        threadsets[i].setparams(i, &db, rnum, thnum, rnd, mode);
+        threadsets[i].start();
+      }
+      for (int32_t i = 0; i < thnum; i++) {
+        threadsets[i].join();
+        if (threadsets[i].error()) err = true;
+      }
+    }
+    etime = kc::time();
+    dbmetaprint(&db, mode == 'g');
+    oprintf("time: %.3f\n", etime - stime);
+  }
+  if (mode == 0 || mode == 'r' || mode == 'e') {
+    oprintf("removing records:\n");
+    stime = kc::time();
+    class ThreadRemove : public kc::Thread {
+     public:
+      void setparams(int32_t id, kc::IndexDB* db, int64_t rnum, int32_t thnum,
+                     bool rnd, int32_t mode) {
+        id_ = id;
+        db_ = db;
+        rnum_ = rnum;
+        thnum_ = thnum;
+        err_ = false;
+        rnd_ = rnd;
+        mode_ = mode;
+      }
+      bool error() {
+        return err_;
+      }
+      void run() {
+        int64_t base = id_ * rnum_;
+        int64_t range = rnum_ * thnum_;
+        for (int64_t i = 1; !err_ && i <= rnum_; i++) {
+          char kbuf[RECBUFSIZ];
+          size_t ksiz = std::sprintf(kbuf, "%08lld",
+                                     (long long)(rnd_ ? myrand(range) + 1 : base + i));
+          if (!db_->remove(kbuf, ksiz) &&
+              ((!rnd_ && mode_ != 'e') || db_->error() != kc::BasicDB::Error::NOREC)) {
+            dberrprint(db_, __LINE__, "DB::remove");
+            err_ = true;
+          }
+          if (id_ < 1 && rnum_ > 250 && i % (rnum_ / 250) == 0) {
+            oputchar('.');
+            if (i == rnum_ || i % (rnum_ / 10) == 0) oprintf(" (%08lld)\n", (long long)i);
+          }
+        }
+      }
+     private:
+      int32_t id_;
+      kc::IndexDB* db_;
+      int64_t rnum_;
+      int32_t thnum_;
+      bool err_;
+      bool rnd_;
+      int32_t mode_;
+    };
+    ThreadRemove threadsets[THREADMAX];
+    if (thnum < 2) {
+      threadsets[0].setparams(0, &db, rnum, thnum, rnd, mode);
+      threadsets[0].run();
+      if (threadsets[0].error()) err = true;
+    } else {
+      for (int32_t i = 0; i < thnum; i++) {
+        threadsets[i].setparams(i, &db, rnum, thnum, rnd, mode);
+        threadsets[i].start();
+      }
+      for (int32_t i = 0; i < thnum; i++) {
+        threadsets[i].join();
+        if (threadsets[i].error()) err = true;
+      }
+    }
+    etime = kc::time();
+    dbmetaprint(&db, mode == 'r' || mode == 'e');
+    oprintf("time: %.3f\n", etime - stime);
+  }
+  stime = kc::time();
+  if (!db.close()) {
+    dberrprint(&db, __LINE__, "DB::close");
+    err = true;
+  }
+  etime = kc::time();
+  oprintf("time: %.3f\n", etime - stime);
   oprintf("%s\n\n", err ? "error" : "ok");
   return err ? 1 : 0;
 }

@@ -917,6 +917,22 @@ class CacheDB : public BasicDB {
     return new Cursor(this);
   }
   /**
+   * Write a log message.
+   * @param file the file name of the program source code.
+   * @param line the line number of the program source code.
+   * @param func the function name of the program source code.
+   * @param kind the kind of the event.  Logger::DEBUG for debugging, Logger::INFO for normal
+   * information, Logger::WARN for warning, and Logger::ERROR for fatal error.
+   * @param message the supplement message.
+   */
+  void log(const char* file, int32_t line, const char* func, Logger::Kind kind,
+           const char* message) {
+    _assert_(file && line > 0 && func && message);
+    ScopedSpinRWLock lock(&mlock_, false);
+    if (!logger_) return;
+    logger_->log(file, line, func, kind, message);
+  }
+  /**
    * Set the internal logger.
    * @param logger the logger object.
    * @param kinds kinds of logged messages by bitwise-or: Logger::DEBUG for debugging,

@@ -1199,6 +1199,109 @@ const char* kcmapsortget(KCMAPSORT* sort, size_t* ksp, const char** vbp, size_t*
 void kcmapsortstep(KCMAPSORT* sort);
 
 
+/**
+ * C wrapper of memory-saving string hash map.
+ */
+typedef union {
+  void* list;                            /**< dummy member */
+} KCLIST;
+
+
+/**
+ * Create a string array list object.
+ * @return the created list object.
+ * @note The object of the return value should be released with the kclistdel function when it is
+ * no longer in use.
+ */
+KCLIST* kclistnew();
+
+
+/**
+ * Destroy a list object.
+ * @param list the list object.
+ */
+void kclistdel(KCLIST* list);
+
+
+/**
+ * Insert a record at the bottom of the list.
+ * @param list the list object.
+ * @param buf the pointer to the record region.
+ * @param size the size of the record region.
+ */
+void kclistpush(KCLIST* list, const char* buf, size_t size);
+
+
+/**
+ * Remove a record at the bottom of the list.
+ * @param list the list object.
+ * @return true if the operation success, or false if there is no record in the list.
+ */
+int32_t kclistpop(KCLIST* list);
+
+
+/**
+ * Insert a record at the top of the list.
+ * @param list the list object.
+ * @param buf the pointer to the record region.
+ * @param size the size of the record region.
+ */
+void kclistunshift(KCLIST* list, const char* buf, size_t size);
+
+
+/**
+ * Remove a record at the top of the list.
+ * @param list the list object.
+ * @return true if the operation success, or false if there is no record in the list.
+ */
+int32_t kclistshift(KCLIST* list);
+
+
+/**
+ * Insert a record at the position of the given index of the list.
+ * @param list the list object.
+ * @param buf the pointer to the record region.
+ * @param size the size of the record region.
+ * @param idx the index of the position.  It must be equal to or less than the number of
+ * records.
+ */
+void kclistinsert(KCLIST* list, const char* buf, size_t size, size_t idx);
+
+
+/**
+ * Remove a record at the position of the given index of the list.
+ * @param list the list object.
+ * @param idx the index of the position.  It must be less than the number of records.
+ */
+void kclistremove(KCLIST* list, size_t idx);
+
+
+/**
+ * Retrieve a record at the position of the given index of the list.
+ * @param list the list object.
+ * @param idx the index of the position.  It must be less than the number of records.
+ * @param sp the pointer to the variable into which the size of the region of the return
+ * value is assigned.
+ * @return the pointer to the region of the retrieved record.
+ */
+const char* kclistget(KCLIST* list, size_t idx, size_t* sp);
+
+
+/**
+ * Remove all records.
+ * @param list the list object.
+ */
+void kclistclear(KCLIST* list);
+
+
+/**
+ * Get the number of records.
+ * @param list the list object.
+ * @return the number of records.
+ */
+size_t kclistcount(KCLIST* list);
+
+
 #if defined(__cplusplus)
 }
 #endif

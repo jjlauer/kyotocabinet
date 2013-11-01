@@ -1099,6 +1099,115 @@ void kcmapsortstep(KCMAPSORT* sort) {
 }
 
 
+/**
+ * Create a string array list object.
+ */
+KCLIST* kclistnew() {
+  _assert_(true);
+  return (KCLIST*)new TinyArrayList();
+}
+
+
+/**
+ * Destroy a list object.
+ */
+void kclistdel(KCLIST* list) {
+  _assert_(list);
+  TinyArrayList* tal = (TinyArrayList*)list;
+  delete tal;
+}
+
+
+/**
+ * Insert a record at the bottom of the list.
+ */
+void kclistpush(KCLIST* list, const char* buf, size_t size) {
+  _assert_(list && buf && size <= MEMMAXSIZ);
+  TinyArrayList* tal = (TinyArrayList*)list;
+  tal->push(buf, size);
+}
+
+
+/**
+ * Remove a record at the bottom of the list.
+ */
+int32_t kclistpop(KCLIST* list) {
+  _assert_(list);
+  TinyArrayList* tal = (TinyArrayList*)list;
+  return tal->pop();
+}
+
+
+/**
+ * Insert a record at the top of the list.
+ */
+void kclistunshift(KCLIST* list, const char* buf, size_t size) {
+  _assert_(list && buf && size <= MEMMAXSIZ);
+  TinyArrayList* tal = (TinyArrayList*)list;
+  tal->unshift(buf, size);
+}
+
+
+/**
+ * Remove a record at the top of the list.
+ */
+int32_t kclistshift(KCLIST* list) {
+  _assert_(list);
+  TinyArrayList* tal = (TinyArrayList*)list;
+  return tal->shift();
+}
+
+
+/**
+ * Insert a record at the position of the given index of the list.
+ */
+void kclistinsert(KCLIST* list, const char* buf, size_t size, size_t idx) {
+  _assert_(list && buf && size <= MEMMAXSIZ);
+  TinyArrayList* tal = (TinyArrayList*)list;
+  tal->insert(buf, size, idx);
+}
+
+
+/**
+ * Remove a record at the position of the given index of the list.
+ */
+void kclistremove(KCLIST* list, size_t idx) {
+  _assert_(list);
+  TinyArrayList* tal = (TinyArrayList*)list;
+  return tal->remove(idx);
+}
+
+
+/**
+ * Retrieve a record at the position of the given index of the list.
+ */
+const char* kclistget(KCLIST* list, size_t idx, size_t* sp) {
+  _assert_(list && sp);
+  TinyArrayList* tal = (TinyArrayList*)list;
+  return tal->get(idx, sp);
+}
+
+
+/**
+ * Remove all records.
+ */
+void kclistclear(KCLIST* list) {
+  _assert_(list);
+  TinyArrayList* tal = (TinyArrayList*)list;
+  tal->clear();
+}
+
+
+/**
+ * Get the number of records.
+ */
+size_t kclistcount(KCLIST* list) {
+  _assert_(list);
+  TinyArrayList* tal = (TinyArrayList*)list;
+  return tal->count();
+}
+
+
 }
 
 // END OF FILE

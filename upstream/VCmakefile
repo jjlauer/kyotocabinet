@@ -121,10 +121,12 @@ check-util :
 	kcutiltest para -th 4 -iv -1 10000
 	kcutiltest file -th 4 casket 10000
 	kcutiltest file -th 4 -rnd -msiz 1m casket 10000
-	kcutiltest thmap -bnum 1000 10000
-	kcutiltest thmap -rnd -bnum 1000 10000
 	kcutiltest lhmap -bnum 1000 10000
 	kcutiltest lhmap -rnd -bnum 1000 10000
+	kcutiltest thmap -bnum 1000 10000
+	kcutiltest thmap -rnd -bnum 1000 10000
+	kcutiltest talist 10000
+	kcutiltest talist -rnd 10000
 	kcutiltest misc 10000
 
 
@@ -704,6 +706,12 @@ check-langc :
 	  "casket.kch#bnum=5000#msiz=50000#dfunit=2" 10000
 	kclangctest order -rnd -etc -oat -tran \
 	  "casket.kch#bnum=5000#msiz=50000#dfunit=2#zcomp=arcz" 10000
+	kclangctest map 10000
+	kclangctest map -etc -bnum 1000 10000
+	kclangctest map -etc -rnd -bnum 1000 10000
+	kclangctest list 10000
+	kclangctest list -etc 10000
+	kclangctest list -etc -rnd 10000
 
 
 check-forever :

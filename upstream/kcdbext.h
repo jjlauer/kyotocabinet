@@ -51,21 +51,21 @@ class MapReduce {
   /** An alias of vector of loaded values. */
   typedef std::vector<std::string> Values;
   /** The default number of temporary databases. */
-  static const size_t MRDEFDBNUM = 8;
+  static const size_t DEFDBNUM = 8;
   /** The maxinum number of temporary databases. */
-  static const size_t MRMAXDBNUM = 256;
+  static const size_t MAXDBNUM = 256;
   /** The default cache limit. */
-  static const int64_t MRDEFCLIM = 512LL << 20;
+  static const int64_t DEFCLIM = 512LL << 20;
   /** The default cache bucket numer. */
-  static const int64_t MRDEFCBNUM = 1048583LL;
+  static const int64_t DEFCBNUM = 1048583LL;
   /** The bucket number of temprary databases. */
-  static const int64_t MRDBBNUM = 512LL << 10;
+  static const int64_t DBBNUM = 512LL << 10;
   /** The page size of temprary databases. */
-  static const int32_t MRDBPSIZ = 32768;
+  static const int32_t DBPSIZ = 32768;
   /** The mapped size of temprary databases. */
-  static const int64_t MRDBMSIZ = 516LL * 4096;
+  static const int64_t DBMSIZ = 516LL * 4096;
   /** The page cache capacity of temprary databases. */
-  static const int64_t MRDBPCCAP = 16LL << 20;
+  static const int64_t DBPCCAP = 16LL << 20;
  public:
   /**
    * Data emitter for the mapper.
@@ -185,8 +185,8 @@ class MapReduce {
    * Default constructor.
    */
   explicit MapReduce() :
-      rcomp_(NULL), tmpdbs_(NULL), dbnum_(MRDEFDBNUM), dbclock_(0), keyclock_(0),
-      cache_(NULL), csiz_(0), clim_(MRDEFCLIM), cbnum_(MRDEFCBNUM) {
+      db_(NULL), rcomp_(NULL), tmpdbs_(NULL), dbnum_(DEFDBNUM), dbclock_(0),
+      cache_(NULL), csiz_(0), clim_(DEFCLIM), cbnum_(DEFCBNUM) {
     _assert_(true);
   }
   /**
@@ -267,6 +267,7 @@ class MapReduce {
     if (count < 0) return false;
     bool err = false;
     double stime, etime;
+    db_ = db;
     rcomp_ = LEXICALCOMP;
     BasicDB* idb = db;
     if (typeid(*db) == typeid(PolyDB)) {
@@ -293,9 +294,9 @@ class MapReduce {
         int32_t myopts = 0;
         if (!(opts & XNOCOMP)) myopts |= GrassDB::TCOMPRESS;
         gdb->tune_options(myopts);
-        gdb->tune_buckets(MRDBBNUM / 2);
-        gdb->tune_page(MRDBPSIZ);
-        gdb->tune_page_cache(MRDBPCCAP);
+        gdb->tune_buckets(DBBNUM / 2);
+        gdb->tune_page(DBPSIZ);
+        gdb->tune_page_cache(DBPCCAP);
         gdb->tune_comparator(rcomp_);
         gdb->open("%", GrassDB::OWRITER | GrassDB::OCREATE | GrassDB::OTRUNCATE);
         tmpdbs_[i] = gdb;
@@ -328,10 +329,10 @@ class MapReduce {
         int32_t myopts = TreeDB::TSMALL | TreeDB::TLINEAR;
         if (!(opts & XNOCOMP)) myopts |= TreeDB::TCOMPRESS;
         tdb->tune_options(myopts);
-        tdb->tune_buckets(MRDBBNUM);
-        tdb->tune_page(MRDBPSIZ);
-        tdb->tune_map(MRDBMSIZ);
-        tdb->tune_page_cache(MRDBPCCAP);
+        tdb->tune_buckets(DBBNUM);
+        tdb->tune_page(DBPSIZ);
+        tdb->tune_map(DBMSIZ);
+        tdb->tune_page_cache(DBPCCAP);
         tdb->tune_comparator(rcomp_);
         if (!tdb->open(childpath, TreeDB::OWRITER | TreeDB::OCREATE | TreeDB::OTRUNCATE)) {
           const BasicDB::Error& e = tdb->error();
@@ -378,7 +379,7 @@ class MapReduce {
     stime = time();
     for (size_t i = 0; i < dbnum_; i++) {
       assert(tmpdbs_[i]);
-      std::string path = tmpdbs_[i]->path();
+      const std::string& path = tmpdbs_[i]->path();
       if (!tmpdbs_[i]->clear()) {
         const BasicDB::Error& e = tmpdbs_[i]->error();
         db->set_error(_KCCODELINE_, e.code(), e.message());
@@ -406,10 +407,10 @@ class MapReduce {
    */
   void tune_storage(int32_t dbnum, int64_t clim, int64_t cbnum) {
     _assert_(true);
-    dbnum_ = dbnum > 0 ? dbnum : MRDEFDBNUM;
-    if (dbnum_ > MRMAXDBNUM) dbnum_ = MRMAXDBNUM;
-    clim_ = clim > 0 ? clim : MRDEFCLIM;
-    cbnum_ = cbnum > 0 ? cbnum : MRDEFCBNUM;
+    dbnum_ = dbnum > 0 ? dbnum : DEFDBNUM;
+    if (dbnum_ > MAXDBNUM) dbnum_ = MAXDBNUM;
+    clim_ = clim > 0 ? clim : DEFCLIM;
+    cbnum_ = cbnum > 0 ? cbnum : DEFCBNUM;
     if (cbnum_ > INT16MAX) cbnum_ = nearbyprime(cbnum_);
   }
  private:
@@ -453,7 +454,6 @@ class MapReduce {
       if (!mr_->preprocess()) err_ = true;
       stime_ = time();
       mr_->dbclock_ = 0;
-      mr_->keyclock_ = 0;
       mr_->cache_ = new TinyHashMap(mr_->cbnum_);
       mr_->csiz_ = 0;
       if (!mr_->logf("map", "started the map process: scale=%lld", (long long)scale_))
@@ -463,10 +463,10 @@ class MapReduce {
     void visit_after() {
       if (mr_->cache_->count() > 0 && !mr_->flush_cache()) err_ = true;
       delete mr_->cache_;
-      if (!mr_->midprocess()) err_ = true;
       double etime = time();
       if (!mr_->logf("map", "the map process finished: time=%.6f", etime - stime_))
         err_ = true;
+      if (!mr_->midprocess()) err_ = true;
       if (!err_ && !mr_->execute_reduce()) err_ = true;
       if (!mr_->postprocess()) err_ = true;
     }
@@ -532,12 +532,16 @@ class MapReduce {
     if (!logf("map", "started to flushing the cache: count=%lld size=%lld",
               (long long)cache_->count(), (long long)csiz_)) err = true;
     double stime = time();
-    BasicDB* db = tmpdbs_[dbclock_];
+    BasicDB* tmpdb = tmpdbs_[dbclock_];
     TinyHashMap::Sorter sorter(cache_);
     const char* kbuf, *vbuf;
     size_t ksiz, vsiz;
     while ((kbuf = sorter.get(&ksiz, &vbuf, &vsiz)) != NULL) {
-      if (!db->append(kbuf, ksiz, vbuf, vsiz)) err = true;
+      if (!tmpdb->append(kbuf, ksiz, vbuf, vsiz)) {
+        const BasicDB::Error& e = tmpdb->error();
+        db_->set_error(_KCCODELINE_, e.code(), e.message());
+        err = true;
+      }
       sorter.step();
     }
     cache_->clear();
@@ -626,6 +630,8 @@ class MapReduce {
   MapReduce(const MapReduce&);
   /** Dummy Operator to forbid the use. */
   MapReduce& operator =(const MapReduce&);
+  /** The internal database. */
+  BasicDB* db_;
   /** The record comparator. */
   Comparator* rcomp_;
   /** The temporary databases. */
@@ -634,8 +640,6 @@ class MapReduce {
   size_t dbnum_;
   /** The logical clock for temporary databases. */
   int64_t dbclock_;
-  /** The logical clock for keys. */
-  int64_t keyclock_;
   /** The cache for emitter. */
   TinyHashMap* cache_;
   /** The current size of the cache for emitter. */
@@ -644,6 +648,866 @@ class MapReduce {
   int64_t clim_;
   /** The bucket number of the cache for emitter. */
   int64_t cbnum_;
+};
+
+
+/**
+ * Index database.
+ * @note This class is designed to implement an indexing storage with an efficient appending
+ * operation for the existing record values.  This class is a wrapper of the polymorphic
+ * database, featuring buffering mechanism to alleviate IO overhead in the database layer.  This
+ * class can be inherited but overwriting methods is forbidden.  Before every database operation,
+ * it is necessary to call the IndexDB::open method in order to open a database file and connect
+ * the database object to it.  To avoid data missing or corruption, it is important to close
+ * every database file by the IndexDB::close method when the database is no longer in use.  It
+ * is forbidden for multible database objects in a process to open the same database at the same
+ * time.  It is forbidden to share a database object with child processes.
+ */
+class IndexDB {
+ private:
+  /** The default number of temporary databases. */
+  static const size_t DEFDBNUM = 8;
+  /** The maxinum number of temporary databases. */
+  static const size_t MAXDBNUM = 256;
+  /** The default cache limit size. */
+  static const int64_t DEFCLIM = 256LL << 20;
+  /** The default cache bucket number. */
+  static const int64_t DEFCBNUM = 1048583LL;
+  /** The bucket number of temprary databases. */
+  static const int64_t DBBNUM = 512LL << 10;
+  /** The page size of temprary databases. */
+  static const int32_t DBPSIZ = 32768;
+  /** The mapped size of temprary databases. */
+  static const int64_t DBMSIZ = 516LL * 4096;
+  /** The page cache capacity of temprary databases. */
+  static const int64_t DBPCCAP = 16LL << 20;
+ public:
+  /**
+   * Default constructor.
+   */
+  explicit IndexDB() :
+      mlock_(), db_(), omode_(0),
+      rcomp_(NULL), tmppath_(""), tmpdbs_(NULL), dbnum_(DEFDBNUM), dbclock_(0),
+      cache_(NULL), csiz_(0), clim_(0) {
+    _assert_(true);
+  }
+  /**
+   * Destructor.
+   * @note If the database is not closed, it is closed implicitly.
+   */
+  virtual ~IndexDB() {
+    _assert_(true);
+    if (omode_ != 0) close();
+  }
+  /**
+   * Get the last happened error.
+   * @return the last happened error.
+   */
+  BasicDB::Error error() const {
+    _assert_(true);
+    return db_.error();
+  }
+  /**
+   * Set the error information.
+   * @param file the file name of the program source code.
+   * @param line the line number of the program source code.
+   * @param func the function name of the program source code.
+   * @param code an error code.
+   * @param message a supplement message.
+   */
+  void set_error(const char* file, int32_t line, const char* func,
+                 BasicDB::Error::Code code, const char* message) {
+    _assert_(file && line > 0 && func && message);
+    db_.set_error(file, line, func, code, message);
+  }
+  /**
+   * Set the error information without source code information.
+   * @param code an error code.
+   * @param message a supplement message.
+   */
+  void set_error(BasicDB::Error::Code code, const char* message) {
+    _assert_(message);
+    db_.set_error(_KCCODELINE_, code, message);
+  }
+  /**
+   * Open a database file.
+   * @param path the path of a database file.  The same as with PolyDB.  In addition, the
+   * following tuning parameters are supported.  "idxclim" specifies the limit size of the
+   * internal cache.  "idxcbnum" the bucket number of the internal cache.  "idxdbnum" specifies
+   * the number of internal databases.  "idxtmppath' specifies the path of the temporary
+   * directory.
+   * @param mode the connection mode.  The same as with PolyDB.
+   * @return true on success, or false on failure.
+   * @note Every opened database must be closed by the IndexDB::close method when it is no longer
+   * in use.  It is not allowed for two or more database objects in the same process to keep
+   * their connections to the same database file at the same time.
+   */
+  bool open(const std::string& path = ":",
+            uint32_t mode = BasicDB::OWRITER | BasicDB::OCREATE) {
+    _assert_(true);
+    ScopedRWLock lock(&mlock_, true);
+    if (omode_ != 0) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "already opened");
+      return false;
+    }
+    std::vector<std::string> elems;
+    strsplit(path, '#', &elems);
+    int64_t clim = 0;
+    int64_t cbnum = 0;
+    size_t dbnum = 0;
+    std::string tmppath = "";
+    std::vector<std::string>::iterator it = elems.begin();
+    std::vector<std::string>::iterator itend = elems.end();
+    if (it != itend) ++it;
+    while (it != itend) {
+      std::vector<std::string> fields;
+      if (strsplit(*it, '=', &fields) > 1) {
+        const char* key = fields[0].c_str();
+        const char* value = fields[1].c_str();
+        if (!std::strcmp(key, "idxclim") || !std::strcmp(key, "idxcachelimit")) {
+          clim = atoix(value);
+        } else if (!std::strcmp(key, "idxcbnum") || !std::strcmp(key, "idxcachebuckets")) {
+          cbnum = atoix(value);
+        } else if (!std::strcmp(key, "idxdbnum")) {
+          dbnum = atoix(value);
+        } else if (!std::strcmp(key, "idxtmppath")) {
+          tmppath = value;
+        }
+      }
+      ++it;
+    }
+    if (!db_.open(path, mode)) return false;
+    tmppath_ = tmppath;
+    rcomp_ = LEXICALCOMP;
+    BasicDB* idb = &db_;
+    if (typeid(db_) == typeid(PolyDB)) {
+      PolyDB* pdb = (PolyDB*)idb;
+      idb = pdb->reveal_inner_db();
+    }
+    const std::type_info& info = typeid(*idb);
+    if (info == typeid(GrassDB)) {
+      GrassDB* gdb = (GrassDB*)idb;
+      rcomp_ = gdb->rcomp();
+    } else if (info == typeid(TreeDB)) {
+      TreeDB* tdb = (TreeDB*)idb;
+      rcomp_ = tdb->rcomp();
+    } else if (info == typeid(ForestDB)) {
+      ForestDB* fdb = (ForestDB*)idb;
+      rcomp_ = fdb->rcomp();
+    }
+    dbnum_ = dbnum < MAXDBNUM ? dbnum : MAXDBNUM;
+    dbclock_ = 0;
+    if ((mode & BasicDB::OWRITER) && dbnum > 0) {
+      tmpdbs_ = new BasicDB*[dbnum_];
+      if (tmppath_.empty()) {
+        report(_KCCODELINE_, "started to open temporary databases on memory");
+        double stime = time();
+        for (size_t i = 0; i < dbnum_; i++) {
+          GrassDB* gdb = new GrassDB;
+          gdb->tune_options(GrassDB::TCOMPRESS);
+          gdb->tune_buckets(DBBNUM / 2);
+          gdb->tune_page(DBPSIZ);
+          gdb->tune_page_cache(DBPCCAP);
+          gdb->tune_comparator(rcomp_);
+          gdb->open("%", GrassDB::OWRITER | GrassDB::OCREATE | GrassDB::OTRUNCATE);
+          tmpdbs_[i] = gdb;
+        }
+        double etime = time();
+        report(_KCCODELINE_, "opening temporary databases finished: time=%.6f", etime - stime);
+      } else {
+        File::Status sbuf;
+        if (!File::status(tmppath_, &sbuf) || !sbuf.isdir) {
+          set_error(_KCCODELINE_, BasicDB::Error::NOREPOS, "no such directory");
+          delete[] tmpdbs_;
+          db_.close();
+          return false;
+        }
+        report(_KCCODELINE_, "started to open temporary databases under %s", tmppath.c_str());
+        double stime = time();
+        uint32_t pid = getpid() & UINT16MAX;
+        uint32_t tid = Thread::hash() & UINT16MAX;
+        uint32_t ts = time() * 1000;
+        bool err = false;
+        for (size_t i = 0; i < dbnum_; i++) {
+          std::string childpath =
+              strprintf("%s%cidx-%04x-%04x-%08x-%03d%ckct",
+                        tmppath_.c_str(), File::PATHCHR, pid, tid, ts,
+                        (int)(i + 1), File::EXTCHR);
+          TreeDB* tdb = new TreeDB;
+          tdb->tune_options(TreeDB::TSMALL | TreeDB::TLINEAR);
+          tdb->tune_buckets(DBBNUM);
+          tdb->tune_page(DBPSIZ);
+          tdb->tune_map(DBMSIZ);
+          tdb->tune_page_cache(DBPCCAP);
+          tdb->tune_comparator(rcomp_);
+          if (!tdb->open(childpath, TreeDB::OWRITER | TreeDB::OCREATE | TreeDB::OTRUNCATE)) {
+            const BasicDB::Error& e = tdb->error();
+            set_error(_KCCODELINE_, e.code(), e.message());
+            err = true;
+          }
+          tmpdbs_[i] = tdb;
+        }
+        double etime = time();
+        report(_KCCODELINE_, "opening temporary databases finished: time=%.6f", etime - stime);
+        if (err) {
+          for (size_t i = 0; i < dbnum_; i++) {
+            delete tmpdbs_[i];
+          }
+          delete[] tmpdbs_;
+          db_.close();
+          return false;
+        }
+      }
+    } else {
+      tmpdbs_ = NULL;
+    }
+    if (mode & BasicDB::OWRITER) {
+      cache_ = new TinyHashMap(cbnum > 0 ? cbnum : DEFCBNUM);
+    } else {
+      cache_ = NULL;
+    }
+    clim_ = clim > 0 ? clim : DEFCLIM;
+    csiz_ = 0;
+    omode_ = mode;
+    return true;
+  }
+  /**
+   * Close the database file.
+   * @return true on success, or false on failure.
+   */
+  bool close() {
+    _assert_(true);
+    ScopedRWLock lock(&mlock_, true);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "not opened");
+      return false;
+    }
+    bool err = false;
+    if (cache_) {
+      if (!flush_cache()) err = true;
+      delete cache_;
+      if (tmpdbs_) {
+        if (!merge_tmpdbs()) err = true;
+        report(_KCCODELINE_, "closing the temporary databases");
+        double stime = time();
+        for (size_t i = 0; i < dbnum_; i++) {
+          BasicDB* tmpdb = tmpdbs_[i];
+          const std::string& path = tmpdb->path();
+          if (!tmpdb->close()) {
+            const BasicDB::Error& e = tmpdb->error();
+            set_error(_KCCODELINE_, e.code(), e.message());
+            err = true;
+          }
+          if (!tmppath_.empty()) File::remove(path);
+          delete tmpdb;
+        }
+        double etime = time();
+        report(_KCCODELINE_, "closing the temporary databases finished: %.6f", etime - stime);
+        delete[] tmpdbs_;
+      }
+    }
+    if (!db_.close()) err = true;
+    omode_ = 0;
+    return !err;
+  }
+  /**
+   * Set the value of a record.
+   * @param kbuf the pointer to the key region.
+   * @param ksiz the size of the key region.
+   * @param vbuf the pointer to the value region.
+   * @param vsiz the size of the value region.
+   * @return true on success, or false on failure.
+   * @note If no record corresponds to the key, a new record is created.  If the corresponding
+   * record exists, the value is overwritten.
+   */
+  bool set(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
+    _assert_(kbuf && ksiz <= MEMMAXSIZ && vbuf && vsiz <= MEMMAXSIZ);
+    ScopedRWLock lock(&mlock_, true);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "not opened");
+      return false;
+    }
+    if (!cache_) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "permission denied");
+      return false;
+    }
+    bool err = false;
+    if (!clean_dbs(kbuf, ksiz)) err = true;
+    cache_->append(kbuf, ksiz, vbuf, vsiz);
+    csiz_ += ksiz + vsiz;
+    if (csiz_ > clim_ && !flush_cache()) err = false;
+    return !err;
+  }
+  /**
+   * Set the value of a record.
+   * @note Equal to the original DB::set method except that the parameters are std::string.
+   */
+  bool set(const std::string& key, const std::string& value) {
+    _assert_(true);
+    return set(key.c_str(), key.size(), value.c_str(), value.size());
+  }
+  /**
+   * Add a record.
+   * @param kbuf the pointer to the key region.
+   * @param ksiz the size of the key region.
+   * @param vbuf the pointer to the value region.
+   * @param vsiz the size of the value region.
+   * @return true on success, or false on failure.
+   * @note If no record corresponds to the key, a new record is created.  If the corresponding
+   * record exists, the record is not modified and false is returned.
+   */
+  bool add(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
+    _assert_(kbuf && ksiz <= MEMMAXSIZ && vbuf && vsiz <= MEMMAXSIZ);
+    ScopedRWLock lock(&mlock_, true);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "not opened");
+      return false;
+    }
+    if (!cache_) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "permission denied");
+      return false;
+    }
+    if (check_impl(kbuf, ksiz)) {
+      set_error(_KCCODELINE_, BasicDB::Error::DUPREC, "record duplication");
+      return false;
+    }
+    bool err = false;
+    cache_->append(kbuf, ksiz, vbuf, vsiz);
+    csiz_ += ksiz + vsiz;
+    if (csiz_ > clim_ && !flush_cache()) err = false;
+    return !err;
+  }
+  /**
+   * Set the value of a record.
+   * @note Equal to the original DB::add method except that the parameters are std::string.
+   */
+  bool add(const std::string& key, const std::string& value) {
+    _assert_(true);
+    return add(key.c_str(), key.size(), value.c_str(), value.size());
+  }
+  /**
+   * Replace the value of a record.
+   * @param kbuf the pointer to the key region.
+   * @param ksiz the size of the key region.
+   * @param vbuf the pointer to the value region.
+   * @param vsiz the size of the value region.
+   * @return true on success, or false on failure.
+   * @note If no record corresponds to the key, no new record is created and false is returned.
+   * If the corresponding record exists, the value is modified.
+   */
+  bool replace(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
+    _assert_(kbuf && ksiz <= MEMMAXSIZ && vbuf && vsiz <= MEMMAXSIZ);
+    ScopedRWLock lock(&mlock_, true);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "not opened");
+      return false;
+    }
+    if (!cache_) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "permission denied");
+      return false;
+    }
+    if (!check_impl(kbuf, ksiz)) {
+      set_error(_KCCODELINE_, BasicDB::Error::NOREC, "no record");
+      return false;
+    }
+    bool err = false;
+    if (!clean_dbs(kbuf, ksiz)) err = true;
+    cache_->append(kbuf, ksiz, vbuf, vsiz);
+    csiz_ += ksiz + vsiz;
+    if (csiz_ > clim_ && !flush_cache()) err = false;
+    return !err;
+  }
+  /**
+   * Replace the value of a record.
+   * @note Equal to the original DB::replace method except that the parameters are std::string.
+   */
+  bool replace(const std::string& key, const std::string& value) {
+    _assert_(true);
+    return replace(key.c_str(), key.size(), value.c_str(), value.size());
+  }
+  /**
+   * Append the value of a record.
+   * @param kbuf the pointer to the key region.
+   * @param ksiz the size of the key region.
+   * @param vbuf the pointer to the value region.
+   * @param vsiz the size of the value region.
+   * @return true on success, or false on failure.
+   * @note If no record corresponds to the key, a new record is created.  If the corresponding
+   * record exists, the given value is appended at the end of the existing value.
+   */
+  bool append(const char* kbuf, size_t ksiz, const char* vbuf, size_t vsiz) {
+    _assert_(kbuf && ksiz <= MEMMAXSIZ && vbuf && vsiz <= MEMMAXSIZ);
+    ScopedRWLock lock(&mlock_, true);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "not opened");
+      return false;
+    }
+    if (!cache_) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "permission denied");
+      return false;
+    }
+    bool err = false;
+    cache_->append(kbuf, ksiz, vbuf, vsiz);
+    csiz_ += ksiz + vsiz;
+    if (csiz_ > clim_ && !flush_cache()) err = false;
+    return !err;
+  }
+  /**
+   * Set the value of a record.
+   * @note Equal to the original DB::append method except that the parameters are std::string.
+   */
+  bool append(const std::string& key, const std::string& value) {
+    _assert_(true);
+    return append(key.c_str(), key.size(), value.c_str(), value.size());
+  }
+  /**
+   * Remove a record.
+   * @param kbuf the pointer to the key region.
+   * @param ksiz the size of the key region.
+   * @return true on success, or false on failure.
+   * @note If no record corresponds to the key, false is returned.
+   */
+  bool remove(const char* kbuf, size_t ksiz) {
+    _assert_(kbuf && ksiz <= MEMMAXSIZ);
+    ScopedRWLock lock(&mlock_, true);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "not opened");
+      return false;
+    }
+    if (!cache_) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "permission denied");
+      return false;
+    }
+    bool err = false;
+    if (!clean_dbs(kbuf, ksiz)) err = true;
+    cache_->remove(kbuf, ksiz);
+    return !err;
+  }
+  /**
+   * Remove a record.
+   * @note Equal to the original DB::remove method except that the parameter is std::string.
+   */
+  bool remove(const std::string& key) {
+    _assert_(true);
+    return remove(key.c_str(), key.size());
+  }
+  /**
+   * Retrieve the value of a record.
+   * @param kbuf the pointer to the key region.
+   * @param ksiz the size of the key region.
+   * @param sp the pointer to the variable into which the size of the region of the return
+   * value is assigned.
+   * @return the pointer to the value region of the corresponding record, or NULL on failure.
+   * @note If no record corresponds to the key, NULL is returned.  Because an additional zero
+   * code is appended at the end of the region of the return value, the return value can be
+   * treated as a C-style string.  Because the region of the return value is allocated with the
+   * the new[] operator, it should be released with the delete[] operator when it is no longer
+   * in use.
+   */
+  char* get(const char* kbuf, size_t ksiz, size_t* sp) {
+    _assert_(kbuf && ksiz <= MEMMAXSIZ && sp);
+    ScopedRWLock lock(&mlock_, false);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "not opened");
+      return false;
+    }
+    if (!cache_) return db_.get(kbuf, ksiz, sp);
+    size_t dvsiz = 0;
+    char* dvbuf = db_.get(kbuf, ksiz, &dvsiz);
+    size_t cvsiz = 0;
+    const char* cvbuf = cache_->get(kbuf, ksiz, &cvsiz);
+    struct Record {
+      char* buf;
+      size_t size;
+    };
+    Record* recs = NULL;
+    bool hit = false;
+    size_t rsiz = 0;
+    if (tmpdbs_) {
+      recs = new Record[dbnum_];
+      for (size_t i = 0; i < dbnum_; i++) {
+        BasicDB* tmpdb = tmpdbs_[i];
+        Record* rp = recs + i;
+        rp->buf = tmpdb->get(kbuf, ksiz, &rp->size);
+        if (rp->buf) {
+          rsiz += rp->size;
+          hit = true;
+        }
+      }
+    }
+    if (!hit) {
+      delete[] recs;
+      if (!dvbuf && !cvbuf) return NULL;
+      if (!dvbuf) {
+        dvbuf = new char[cvsiz+1];
+        std::memcpy(dvbuf, cvbuf, cvsiz);
+        *sp = cvsiz;
+        return dvbuf;
+      }
+      if (!cvbuf) {
+        *sp = dvsiz;
+        return dvbuf;
+      }
+      char* rbuf = new char[dvsiz+cvsiz+1];
+      std::memcpy(rbuf, dvbuf, dvsiz);
+      std::memcpy(rbuf + dvsiz, cvbuf, cvsiz);
+      delete[] dvbuf;
+      *sp = dvsiz + cvsiz;
+      return rbuf;
+    }
+    if (dvbuf) rsiz += dvsiz;
+    if (cvbuf) rsiz += cvsiz;
+    char* rbuf = new char[rsiz+1];
+    char* wp = rbuf;
+    if (dvbuf) {
+      std::memcpy(wp, dvbuf, dvsiz);
+      wp += dvsiz;
+      delete[] dvbuf;
+    }
+    if (cvbuf) {
+      std::memcpy(wp, cvbuf, cvsiz);
+      wp += cvsiz;
+    }
+    if (recs) {
+      for (size_t i = 0; i < dbnum_; i++) {
+        Record* rp = recs + i;
+        if (rp->buf) {
+          std::memcpy(wp, rp->buf, rp->size);
+          wp += rp->size;
+          delete[] rp->buf;
+        }
+      }
+      delete[] recs;
+    }
+    *sp = rsiz;
+    return rbuf;
+  }
+  /**
+   * Retrieve the value of a record.
+   * @note Equal to the original DB::get method except that the first parameters is the key
+   * string and the second parameter is a string to contain the result and the return value is
+   * bool for success.
+   */
+  bool get(const std::string& key, std::string* value) {
+    _assert_(value);
+    size_t vsiz;
+    char* vbuf = get(key.c_str(), key.size(), &vsiz);
+    if (!vbuf) return false;
+    value->clear();
+    value->append(vbuf, vsiz);
+    delete[] vbuf;
+    return true;
+  }
+  /**
+   * Synchronize updated contents with the file and the device.
+   * @param hard true for physical synchronization with the device, or false for logical
+   * synchronization with the file system.
+   * @param proc a postprocessor object.  If it is NULL, no postprocessing is performed.
+   * @return true on success, or false on failure.
+   * @note The operation of the postprocessor is performed atomically and other threads accessing
+   * the same record are blocked.  To avoid deadlock, any explicit database operation must not
+   * be performed in this function.
+   */
+  bool synchronize(bool hard = false, BasicDB::FileProcessor* proc = NULL) {
+    _assert_(true);
+    ScopedRWLock lock(&mlock_, true);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "not opened");
+      return false;
+    }
+    if (!cache_) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "permission denied");
+      return false;
+    }
+    bool err = false;
+    if (!flush_cache()) err = true;
+    if (tmpdbs_ && !merge_tmpdbs()) err = true;
+    if (!db_.synchronize(hard, proc)) err = true;
+    return !err;
+  }
+  /**
+   * Remove all records.
+   * @return true on success, or false on failure.
+   */
+  bool clear() {
+    _assert_(true);
+    ScopedRWLock lock(&mlock_, true);
+    if (omode_ == 0) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "not opened");
+      return false;
+    }
+    if (!cache_) {
+      set_error(_KCCODELINE_, BasicDB::Error::INVALID, "permission denied");
+      return false;
+    }
+    cache_->clear();
+    csiz_ = 0;
+    return db_.clear();
+  }
+  /**
+   * Get the number of records.
+   * @return the number of records, or -1 on failure.
+   */
+  int64_t count() {
+    _assert_(true);
+    ScopedRWLock lock(&mlock_, false);
+    return count_impl();
+  }
+  /**
+   * Get the size of the database file.
+   * @return the size of the database file in bytes, or -1 on failure.
+   */
+  int64_t size() {
+    _assert_(true);
+    ScopedRWLock lock(&mlock_, false);
+    return size_impl();
+  }
+  /**
+   * Get the path of the database file.
+   * @return the path of the database file, or an empty string on failure.
+   */
+  std::string path() {
+    _assert_(true);
+    return db_.path();
+  }
+  /**
+   * Get the miscellaneous status information.
+   * @param strmap a string map to contain the result.
+   * @return true on success, or false on failure.
+   */
+  bool status(std::map<std::string, std::string>* strmap) {
+    _assert_(strmap);
+    return db_.status(strmap);
+  }
+  /**
+   * Reveal the inner database object.
+   * @return the inner database object, or NULL on failure.
+   */
+  PolyDB* reveal_inner_db() {
+    _assert_(true);
+    return &db_;
+  }
+  /**
+   * Create a cursor object.
+   * @return the return value is the created cursor object.
+   * @note Because the object of the return value is allocated by the constructor, it should be
+   * released with the delete operator when it is no longer in use.
+   */
+  BasicDB::Cursor* cursor() {
+    _assert_(true);
+    return db_.cursor();
+  }
+  /**
+   * Write a log message.
+   * @param file the file name of the program source code.
+   * @param line the line number of the program source code.
+   * @param func the function name of the program source code.
+   * @param kind the kind of the event.  Logger::DEBUG for debugging, Logger::INFO for normal
+   * information, Logger::WARN for warning, and Logger::ERROR for fatal error.
+   * @param message the supplement message.
+   */
+  void log(const char* file, int32_t line, const char* func, BasicDB::Logger::Kind kind,
+           const char* message) {
+    _assert_(file && line > 0 && func && message);
+    db_.log(file, line, func, kind, message);
+  }
+  /**
+   * Set the internal logger.
+   * @param logger the logger object.
+   * @param kinds kinds of logged messages by bitwise-or: Logger::DEBUG for debugging,
+   * Logger::INFO for normal information, Logger::WARN for warning, and Logger::ERROR for fatal
+   * error.
+   * @return true on success, or false on failure.
+   */
+  bool tune_logger(BasicDB::Logger* logger,
+                   uint32_t kinds = BasicDB::Logger::WARN | BasicDB::Logger::ERROR) {
+    _assert_(logger);
+    return db_.tune_logger(logger, kinds);
+  }
+  /**
+   * Set the internal meta operation trigger.
+   * @param trigger the trigger object.
+   * @return true on success, or false on failure.
+   */
+  bool tune_meta_trigger(BasicDB::MetaTrigger* trigger) {
+    _assert_(trigger);
+    return db_.tune_meta_trigger(trigger);
+  }
+ protected:
+  /**
+   * Report a message for debugging.
+   * @param file the file name of the program source code.
+   * @param line the line number of the program source code.
+   * @param func the function name of the program source code.
+   * @param format the printf-like format string.
+   * @param ... used according to the format string.
+   */
+  void report(const char* file, int32_t line, const char* func, const char* format, ...) {
+    _assert_(file && line > 0 && func && format);
+    std::string message;
+    va_list ap;
+    va_start(ap, format);
+    vstrprintf(&message, format, ap);
+    va_end(ap);
+    db_.log(file, line, func, BasicDB::Logger::INFO, message.c_str());
+  }
+ private:
+  /**
+   * Flush all cache records.
+   * @return true on success, or false on failure.
+   */
+  bool flush_cache() {
+    _assert_(true);
+    bool err = false;
+    double stime = time();
+    report(_KCCODELINE_, "flushing the cache");
+    if (tmpdbs_) {
+      BasicDB* tmpdb = tmpdbs_[dbclock_];
+      TinyHashMap::Sorter sorter(cache_);
+      const char* kbuf, *vbuf;
+      size_t ksiz, vsiz;
+      while ((kbuf = sorter.get(&ksiz, &vbuf, &vsiz)) != NULL) {
+        if (!tmpdb->append(kbuf, ksiz, vbuf, vsiz)) {
+          const BasicDB::Error& e = tmpdb->error();
+          db_.set_error(_KCCODELINE_, e.code(), e.message());
+          err = true;
+        }
+        sorter.step();
+      }
+      dbclock_ = (dbclock_ + 1) % dbnum_;
+    } else {
+      TinyHashMap::Sorter sorter(cache_);
+      const char* kbuf, *vbuf;
+      size_t ksiz, vsiz;
+      while ((kbuf = sorter.get(&ksiz, &vbuf, &vsiz)) != NULL) {
+        if (!db_.append(kbuf, ksiz, vbuf, vsiz)) err = true;
+        sorter.step();
+      }
+    }
+    cache_->clear();
+    csiz_ = 0;
+    double etime = time();
+    report(_KCCODELINE_, "flushing the cache finished: time=%.6f", etime - stime);
+    return !err;
+  }
+  /**
+   * Merge temporary databases.
+   * @return true on success, or false on failure.
+   */
+  bool merge_tmpdbs() {
+    _assert_(true);
+    bool err = false;
+    report(_KCCODELINE_, "merging the temporary databases");
+    double stime = time();
+    if (!db_.merge(tmpdbs_, dbnum_, PolyDB::MAPPEND)) err = true;
+    dbclock_ = 0;
+    for (size_t i = 0; i < dbnum_; i++) {
+      BasicDB* tmpdb = tmpdbs_[i];
+      if (!tmpdb->clear()) {
+        const BasicDB::Error& e = tmpdb->error();
+        set_error(_KCCODELINE_, e.code(), e.message());
+        err = true;
+      }
+    }
+    double etime = time();
+    report(_KCCODELINE_, "merging the temporary databases finished: %.6f", etime - stime);
+    return !err;
+  }
+  /**
+   * Remove a record from databases.
+   * @param kbuf the pointer to the key region.
+   * @param ksiz the size of the key region.
+   * @return true on success, or false on failure.
+   */
+  bool clean_dbs(const char* kbuf, size_t ksiz) {
+    _assert_(kbuf && ksiz <= MEMMAXSIZ);
+    if (db_.remove(kbuf, ksiz)) return true;
+    bool err = false;
+    if (db_.error() != BasicDB::Error::NOREC) err = true;
+    if (tmpdbs_) {
+      for (size_t i = 0; i < dbnum_; i++) {
+        BasicDB* tmpdb = tmpdbs_[i];
+        if (!tmpdb->remove(kbuf, ksiz)) {
+          const BasicDB::Error& e = tmpdb->error();
+          if (e != BasicDB::Error::NOREC) {
+            set_error(_KCCODELINE_, e.code(), e.message());
+            err = true;
+          }
+        }
+      }
+    }
+    return !err;
+  }
+  /**
+   * Check whether a record exists.
+   * @param kbuf the pointer to the key region.
+   * @param ksiz the size of the key region.
+   * @return true if the record exists, or false if not.
+   */
+  bool check_impl(const char* kbuf, size_t ksiz) {
+    _assert_(kbuf && ksiz <= MEMMAXSIZ);
+    char vbuf;
+    if (db_.get(kbuf, ksiz, &vbuf, 1) >= 0) return true;
+    if (cache_) {
+      size_t vsiz;
+      if (cache_->get(kbuf, ksiz, &vsiz)) return true;
+      if (tmpdbs_) {
+        for (size_t i = 0; i < dbnum_; i++) {
+          BasicDB* tmpdb = tmpdbs_[i];
+          if (tmpdb->get(kbuf, ksiz, &vbuf, 1)) return true;
+        }
+      }
+    }
+    return false;
+  }
+  /**
+   * Get the number of records.
+   * @return the number of records, or -1 on failure.
+   */
+  int64_t count_impl() {
+    _assert_(true);
+    int64_t dbcnt = db_.count();
+    if (dbcnt < 0) return -1;
+    if (!cache_) return dbcnt;
+    int64_t ccnt = cache_->count();
+    return dbcnt > ccnt ? dbcnt : ccnt;
+  }
+  /**
+   * Get the size of the database file.
+   * @return the size of the database file in bytes.
+   */
+  int64_t size_impl() {
+    _assert_(true);
+    int64_t dbsiz = db_.size();
+    if (dbsiz < 0) return -1;
+    return dbsiz + csiz_;
+  }
+  /** Dummy constructor to forbid the use. */
+  IndexDB(const IndexDB&);
+  /** Dummy Operator to forbid the use. */
+  IndexDB& operator =(const IndexDB&);
+  /** The method lock. */
+  RWLock mlock_;
+  /** The internal database. */
+  PolyDB db_;
+  /** The open mode. */
+  uint32_t omode_;
+  /** The record comparator. */
+  Comparator* rcomp_;
+  /** The base path of temporary databases. */
+  std::string tmppath_;
+  /** The temporary databases. */
+  BasicDB** tmpdbs_;
+  /** The number of temporary databases. */
+  size_t dbnum_;
+  /** The logical clock for temporary databases. */
+  int64_t dbclock_;
+  /** The internal cache. */
+  TinyHashMap* cache_;
+  /** The current size of the internal cache. */
+  int64_t csiz_;
+  /** The limit size of the internal cache. */
+  int64_t clim_;
 };
 
 

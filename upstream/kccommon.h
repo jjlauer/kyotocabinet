@@ -53,9 +53,10 @@ extern "C" {
 #include <string>
 #include <vector>
 #include <list>
+#include <queue>
+#include <deque>
 #include <map>
 #include <set>
-#include <queue>
 
 #include <ios>
 #include <iostream>

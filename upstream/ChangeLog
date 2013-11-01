@@ -1,3 +1,23 @@
+2011-03-06  FAL Labs  <info@fallabs.com>
+
+	* kcutil.h (hexdecode): a bug of boundary violation was fixed.
+
+	* kcthread.cc (SpinLock::unlock, SlottedSpinLock::unlock): release lock is now used.
+
+	* kcmap.h (TinyArrayList): new class.
+
+	* kcdb.h (BasicDB::log): new function.
+
+	* kcdbext.h (IndexDB): new class.
+
+	* kcutiltest.cc (runtalist, proctalist): new functions.
+
+	* kcpolytest.h (runindex, procindex): new functions.
+
+	* kclangctest.cc (runlist, proclist): new functions.
+
+	- Release: 1.2.49
+
 2011-03-01  FAL Labs  <info@fallabs.com>
 
 	* kclangc.h (kcmapnew, kcmapdel, kcmapiterator, kcmapsorter): new functions.
